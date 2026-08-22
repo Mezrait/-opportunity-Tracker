@@ -222,6 +222,39 @@ def test_extract_same_domain_links_rejects_suffix_spoofed_lookalike():
     assert "https://uwa.edu.au/apply" in links
 
 
+def test_extract_same_domain_links_finds_bare_urls_in_extracted_text(mocker):
+    """Stored document text is extracted VISIBLE text for every fetch method (Playwright
+    inner_text, PDF text, and -- since the I2 fix -- BeautifulSoup-extracted HTTP text), so
+    an href-only regex is inert on exactly the pages the digger exists to handle. Bare
+    absolute URLs survive text extraction and must still be followed."""
+    document_text = (
+        "Research Training Program Scholarship\n"
+        "Full conditions: https://uwa.edu.au/scholarships/conditions.\n"
+        "Deadlines are listed at https://apply.uwa.edu.au/key-dates\n"
+        "Unrelated: https://example.com/blog and mailto:study@uwa.edu.au\n"
+    )
+
+    links = _extract_same_domain_links(
+        document_text, base_url="https://uwa.edu.au/", registrable_domain="uwa.edu.au"
+    )
+
+    assert "https://uwa.edu.au/scholarships/conditions" in links  # trailing '.' trimmed
+    assert "https://apply.uwa.edu.au/key-dates" in links
+    assert "https://example.com/blog" not in links
+
+
+def test_extract_same_domain_links_dedupes_href_and_bare_url_for_one_target():
+    document_text = (
+        '<a href="https://uwa.edu.au/apply">Apply</a> or visit https://uwa.edu.au/apply'
+    )
+
+    links = _extract_same_domain_links(
+        document_text, base_url="https://uwa.edu.au/", registrable_domain="uwa.edu.au"
+    )
+
+    assert links.count("https://uwa.edu.au/apply") == 1
+
+
 def test_dig_does_not_raise_when_llm_call_fails(mocker, tmp_path):
     """client.messages.create raising (rate limit, timeout, network blip) must
     never propagate out of dig() -- the contract is 'never raise', with a

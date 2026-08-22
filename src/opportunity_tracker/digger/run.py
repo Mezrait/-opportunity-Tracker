@@ -34,6 +34,17 @@ _MAX_DEPTH = 2
 
 _HREF_PATTERN = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
 
+# Stored document text is EXTRACTED VISIBLE TEXT for every fetch method -- Playwright's
+# inner_text for headless renders, plain text for PDFs, and (since the I2 fix) BeautifulSoup
+# -extracted text for plain HTTP too. None of those carry `href="..."` attributes, so an
+# href-only regex is inert on exactly the JS-rendered pages this crawl exists to handle.
+# Bare absolute URLs, on the other hand, do survive text extraction. Both patterns are
+# scanned, so link-following works whether the stored text happens to contain markup or not.
+_BARE_URL_PATTERN = re.compile(r'https?://[^\s<>"\'()\[\]]+', re.IGNORECASE)
+
+# Trailing sentence punctuation is not part of a bare URL that ends a sentence.
+_URL_TRAILING_PUNCTUATION = ".,;:!?"
+
 _SINGLE_FIELD_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -135,9 +146,15 @@ def _extract_same_domain_links(
     (mailto:, tel:, javascript:, fragment-only anchors), are excluded -- the
     digger's crawl is bounded to a single registrable domain (spec section 6.3).
     """
+    hrefs = [match.group(1) for match in _HREF_PATTERN.finditer(document_text)]
+    hrefs += [
+        match.group(0).rstrip(_URL_TRAILING_PUNCTUATION)
+        for match in _BARE_URL_PATTERN.finditer(document_text)
+    ]
+
     links: list[str] = []
-    for match in _HREF_PATTERN.finditer(document_text):
-        href = match.group(1)
+    seen: set[str] = set()
+    for href in hrefs:
         if href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
         absolute = urljoin(base_url, href)
@@ -149,6 +166,9 @@ def _extract_same_domain_links(
             or parsed.netloc.endswith("." + registrable_domain)
         ):
             continue
+        if absolute in seen:
+            continue
+        seen.add(absolute)
         links.append(absolute)
     return links
 
