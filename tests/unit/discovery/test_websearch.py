@@ -1,6 +1,6 @@
 """Tests for the Claude web_search wrapper. anthropic.Anthropic is mocked entirely --
 this suite never calls the real Anthropic API."""
-from opportunity_tracker.discovery.websearch import build_query, search_institution
+from opportunity_tracker.discovery.websearch import build_query, search_domain, search_institution
 from opportunity_tracker.models import Filter, Institution, InstitutionSource
 
 
@@ -116,3 +116,30 @@ def test_search_institution_handles_server_tool_error_block(mocker):
     results = search_institution(_make_institution(), _make_filter(), api_key="sk-test")
 
     assert results == []
+
+
+def test_search_domain_scopes_tools_to_bare_domain_and_returns_results(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.messages.create.return_value = _FakeResponse(
+        content=[
+            _FakeContentBlock(
+                "web_search_tool_result",
+                [_FakeResultItem("https://uwa.edu.au/rules/deadline", "Deadline")],
+            )
+        ]
+    )
+    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+
+    results = search_domain("uwa.edu.au", "application deadline", api_key="sk-test", max_uses=1)
+
+    assert results == [{"url": "https://uwa.edu.au/rules/deadline", "title": "Deadline"}]
+    _, kwargs = fake_client.messages.create.call_args
+    assert kwargs["tools"] == [
+        {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 1,
+            "allowed_domains": ["uwa.edu.au"],
+        }
+    ]
+    assert kwargs["messages"][0]["content"] == "application deadline"

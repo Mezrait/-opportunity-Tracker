@@ -86,3 +86,47 @@ def search_institution(
             results.append({"url": url, "title": title})
 
     return results
+
+
+def search_domain(domain: str, query: str, api_key: str, max_uses: int = 1) -> list[dict]:
+    """Run one domain-scoped Claude web_search against a bare registrable domain.
+
+    Sibling to search_institution, for a caller (the digger) that has a
+    registrable domain and a free-text query but no Institution/Filter pair to
+    build one from via build_query(). Same URL/title-only, deduplicated,
+    error-degrades-to-[] contract as search_institution.
+    """
+    client = anthropic.Anthropic(api_key=api_key)
+
+    response = client.messages.create(
+        model=_MODEL,
+        max_tokens=_MAX_TOKENS,
+        messages=[{"role": "user", "content": query}],
+        tools=[
+            {
+                "type": _WEB_SEARCH_TOOL_TYPE,
+                "name": "web_search",
+                "max_uses": max_uses,
+                "allowed_domains": [domain],
+            }
+        ],
+    )
+
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+
+    for block in response.content:
+        if getattr(block, "type", None) != "web_search_tool_result":
+            continue
+        content = block.content
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            url = getattr(item, "url", None)
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            title = getattr(item, "title", None) or ""
+            results.append({"url": url, "title": title})
+
+    return results
