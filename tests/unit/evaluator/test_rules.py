@@ -143,9 +143,9 @@ def test_informational_boolean_kind_uses_same_rule():
 
 
 def test_boolean_kind_degree_level_matches_profile():
-    # Proves _BOOLEAN_KIND_ATTRIBUTES[DEGREE_LEVEL] == "degree_level" actually wires to a
-    # real profile attribute lookup -- a typo here would silently strand this kind at
-    # permanent UNKNOWN with no test catching it.
+    # Proves DEGREE_LEVEL actually wires to a real "degree_level" profile attribute lookup
+    # -- a typo here would silently strand this kind at permanent UNKNOWN with no test
+    # catching it.
     requirement = _make_requirement(RequirementKind.DEGREE_LEVEL, value="phd")
     profile = _make_profile({"degree_level": "phd"})
     assert evaluate_requirement(requirement, profile) == Outcome.PASS
@@ -187,3 +187,87 @@ def test_research_project_fraction_unknown_when_requirement_value_is_none():
     )
     profile = _make_profile({"research_project_fraction_held": 0.30})
     assert evaluate_requirement(requirement, profile) == Outcome.UNKNOWN
+
+
+# --- Design decision: ENGLISH_TEST never manufactures a PASS -------------------------------
+# Holding SOME english_test_result used to return PASS regardless of the requirement's
+# actual threshold -- the only rule that could manufacture a false PASS on a required kind,
+# presenting an ineligible award as ACT_NOW. Same ruling as MIN_GRADE (spec §6.5): a
+# comparison that cannot be made with confidence yields UNKNOWN, not a guess.
+
+def test_english_test_is_unknown_even_when_the_profile_holds_a_result():
+    requirement = _make_requirement(
+        RequirementKind.ENGLISH_TEST, operator=">=", value="IELTS 7.0, no band below 6.5"
+    )
+    profile = _make_profile({"english_test_result": {"test": "IELTS", "score": 6.5}})
+    assert evaluate_requirement(requirement, profile) == Outcome.UNKNOWN
+
+
+def test_english_test_is_unknown_even_when_the_profile_clearly_exceeds_it():
+    requirement = _make_requirement(
+        RequirementKind.ENGLISH_TEST, operator=">=", value="IELTS 6.0"
+    )
+    profile = _make_profile({"english_test_result": {"test": "IELTS", "score": 8.5}})
+    assert evaluate_requirement(requirement, profile) == Outcome.UNKNOWN
+
+
+# --- Whole-branch review I11: required free-text kinds never manufacture a FAIL ------------
+
+def test_nationality_exact_match_is_pass():
+    requirement = _make_requirement(RequirementKind.NATIONALITY, value="Algerian")
+    profile = _make_profile({"nationality": "algerian"})
+    assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+def test_nationality_plausible_but_different_phrasing_is_unknown_not_fail():
+    # The false-block case: "open to international students" is not evidence that an
+    # Algerian applicant is ineligible, but naive string equality made it a FAIL, which
+    # buckets the award LIKELY BLOCKED and hides a real opportunity for good.
+    requirement = _make_requirement(
+        RequirementKind.NATIONALITY, value="open to international students"
+    )
+    profile = _make_profile({"nationality": "Algerian"})
+    assert evaluate_requirement(requirement, profile) == Outcome.UNKNOWN
+
+
+def test_nationality_normalises_case_and_whitespace_before_comparing():
+    requirement = _make_requirement(RequirementKind.NATIONALITY, value="  ALGERIAN  ")
+    profile = _make_profile({"nationality": "algerian"})
+    assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+def test_nationality_unknown_when_profile_attribute_missing():
+    requirement = _make_requirement(RequirementKind.NATIONALITY, value="australian")
+    assert evaluate_requirement(requirement, _make_profile({})) == Outcome.UNKNOWN
+
+
+def test_degree_level_exact_match_is_pass():
+    requirement = _make_requirement(RequirementKind.DEGREE_LEVEL, value="PhD")
+    profile = _make_profile({"degree_level": "phd"})
+    assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+def test_degree_level_known_synonym_is_pass_not_fail():
+    requirement = _make_requirement(RequirementKind.DEGREE_LEVEL, value="Doctor of Philosophy")
+    profile = _make_profile({"degree_level": "phd"})
+    assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+def test_degree_level_genuine_conflict_within_the_known_vocabulary_is_fail():
+    # Both sides resolve through the synonym table, so this comparison IS confident.
+    requirement = _make_requirement(RequirementKind.DEGREE_LEVEL, value="masters")
+    profile = _make_profile({"degree_level": "PhD"})
+    assert evaluate_requirement(requirement, profile) == Outcome.FAIL
+
+
+def test_degree_level_unrecognised_phrasing_is_unknown_not_fail():
+    requirement = _make_requirement(
+        RequirementKind.DEGREE_LEVEL, value="Doctoral Training Programme in Cyber Security"
+    )
+    profile = _make_profile({"degree_level": "phd"})
+    assert evaluate_requirement(requirement, profile) == Outcome.UNKNOWN
+
+
+def test_degree_level_unknown_when_profile_attribute_missing():
+    requirement = _make_requirement(RequirementKind.DEGREE_LEVEL, value="phd")
+    assert evaluate_requirement(requirement, _make_profile({})) == Outcome.UNKNOWN

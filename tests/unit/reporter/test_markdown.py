@@ -141,6 +141,65 @@ def test_render_report_includes_requirement_source_and_retrieved_at():
     conn.close()
 
 
+# --- Whole-branch review I10: two awards at one institution must be distinguishable ------
+
+def test_two_awards_at_one_institution_are_distinguishable_in_the_table():
+    conn = get_connection(":memory:")
+    init_db(conn)
+    stipend = Award(
+        id=1, scheme_id=None, institution="UWA", country="AU", degree_levels=["phd"],
+        intake_year=2027, canonical_url="https://uwa.edu.au/scholarships/rtp-stipend",
+    )
+    fee_offset = Award(
+        id=2, scheme_id=None, institution="UWA", country="AU", degree_levels=["phd"],
+        intake_year=2027, canonical_url="https://uwa.edu.au/scholarships/rtp-fee-offset",
+    )
+    evaluations = [
+        _make_evaluation(1, 1, Bucket.ACT_NOW, 0, 10, 1.0, {"deadline": "pass"}),
+        _make_evaluation(2, 2, Bucket.ACT_NOW, 0, 20, 0.5, {"deadline": "pass"}),
+    ]
+
+    report = render_report(evaluations, {1: stipend, 2: fee_offset}, [], conn)
+
+    assert "Award URL" in report
+    assert "https://uwa.edu.au/scholarships/rtp-stipend" in report
+    assert "https://uwa.edu.au/scholarships/rtp-fee-offset" in report
+    conn.close()
+
+
+def test_source_block_label_includes_the_award_url():
+    conn = get_connection(":memory:")
+    init_db(conn)
+    conn.execute(
+        "INSERT INTO award (scheme_id, institution, country, degree_levels, intake_year, "
+        "canonical_url) VALUES (NULL, 'UWA', 'AU', '[\"phd\"]', 2027, "
+        "'https://uwa.edu.au/scholarships/rtp-stipend')"
+    )
+    conn.execute(
+        "INSERT INTO document (url, source_tier, fetch_method, content_hash, text_path, "
+        "retrieved_at, fetch_status, degraded) VALUES ('https://uwa.edu.au/rules', 1, "
+        "'http', 'abc', 'docs/1.txt', '2026-08-01T00:00:00', 'ok', 0)"
+    )
+    conn.execute(
+        "INSERT INTO requirement (award_id, document_id, kind, operator, value, unit, "
+        "raw_text, evidence, confidence, extracted_at, human_verified) VALUES "
+        "(1, 1, 'deadline', NULL, '2027-03-15', NULL, 'closes 15 March 2027', "
+        "'closes 15 March 2027', 0.9, '2026-08-22T00:00:00', 0)"
+    )
+    conn.commit()
+
+    award = Award(
+        id=1, scheme_id=None, institution="UWA", country="AU", degree_levels=["phd"],
+        intake_year=2027, canonical_url="https://uwa.edu.au/scholarships/rtp-stipend",
+    )
+    evaluation = _make_evaluation(1, 1, Bucket.ACT_NOW, 0, 10, 1.0, {"deadline": "pass"})
+
+    report = render_report([evaluation], {1: award}, [], conn)
+
+    assert "**UWA** — https://uwa.edu.au/scholarships/rtp-stipend sources:" in report
+    conn.close()
+
+
 def test_render_report_handles_no_evaluations():
     conn = get_connection(":memory:")
     init_db(conn)

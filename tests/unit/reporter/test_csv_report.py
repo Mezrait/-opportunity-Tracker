@@ -41,7 +41,7 @@ def test_render_csv_header_row():
     reader = csv.reader(io.StringIO(csv_text))
     header = next(reader)
     assert header == [
-        "institution", "bucket", "days_remaining", "unknown_count",
+        "institution", "award_url", "bucket", "days_remaining", "unknown_count",
         "min_grade", "research_project_fraction", "thesis_required", "english_test",
         "nationality", "deadline", "degree_level", "intake_year",
     ]
@@ -60,6 +60,7 @@ def test_render_csv_row_values_match_evaluation_fields():
     reader = csv.DictReader(io.StringIO(csv_text))
     row = next(reader)
     assert row["institution"] == "UWA"
+    assert row["award_url"] == "https://example.edu/1"
     assert row["bucket"] == "LIKELY_BLOCKED"
     assert row["days_remaining"] == "45"
     assert row["unknown_count"] == "1"

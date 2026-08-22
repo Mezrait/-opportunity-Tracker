@@ -60,7 +60,14 @@ def _render_evaluation_row(evaluation: Evaluation, award: Award) -> str:
     outcomes_summary = "; ".join(
         f"{kind}={outcome}" for kind, outcome in outcomes.items()
     ) or "no requirements assessed"
-    return f"| {award.institution} | {award.country} | {days} | {outcomes_summary} |"
+    # canonical_url, not just institution: one institution routinely offers several awards
+    # (an RTP stipend, a fee offset, a faculty top-up), and without the URL those rows are
+    # indistinguishable -- the reader cannot tell which scheme a row's outcomes describe,
+    # nor which one to go and apply for.
+    return (
+        f"| {award.institution} | {award.canonical_url} | {award.country} | "
+        f"{days} | {outcomes_summary} |"
+    )
 
 
 def _render_sources(conn: sqlite3.Connection, evaluation: Evaluation, award: Award) -> list[str]:
@@ -81,7 +88,9 @@ def _render_sources(conn: sqlite3.Connection, evaluation: Evaluation, award: Awa
         )
     if not requirement_lines:
         return []
-    return [f"- **{award.institution}** sources:", *requirement_lines]
+    # Keyed by institution + canonical_url for the same reason the table row is: two awards
+    # at one institution would otherwise produce two identically-labelled source blocks.
+    return [f"- **{award.institution}** — {award.canonical_url} sources:", *requirement_lines]
 
 
 def render_report(
@@ -114,8 +123,10 @@ def render_report(
             lines.append("_None._")
             lines.append("")
             continue
-        lines.append("| Institution | Country | Days Remaining | Requirement Outcomes |")
-        lines.append("|---|---|---|---|")
+        lines.append(
+            "| Institution | Award URL | Country | Days Remaining | Requirement Outcomes |"
+        )
+        lines.append("|---|---|---|---|---|")
         source_lines: list[str] = []
         for evaluation in bucket_evaluations:
             award = awards_by_id[evaluation.award_id]
