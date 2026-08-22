@@ -1,0 +1,9 @@
+# Copy this file to seeds.yaml. Optional — a manual "always check these too" pin list,
+# for opportunities you already know about that discovery might miss (directory gaps,
+# search misses). Pinned entries flow through the same fetch/extract/evaluate pipeline as
+# discovered ones. See spec §4.3, §6.0.
+
+- institution_domain: uwa.edu.au
+  url: https://www.uwa.edu.au/study/scholarships/international-rtp
+- institution_domain: cybersure-master.eu
+  url: https://www.cybersure-master.eu/admission

@@ -1,0 +1,51 @@
+# Copy this file to profile.yaml and fill in your real details.
+# Leave a field as `null` if you genuinely don't know it yet or it doesn't apply to you —
+# the tool treats a missing attribute as "unknown", never as a fail. See
+# docs/superpowers/specs/2026-08-22-opportunity-tracker-design.md §6.5, §11.
+#
+# The tool never automates GPA/WAM grade conversion (spec §6.5) — min_grade requirements
+# always evaluate to "unknown" regardless of what you put here. There is deliberately no
+# grade field in this file for that reason.
+
+# What you are held/target-holding, used against research_project_fraction requirements
+# (a number 0-1, e.g. 0.10 for a 10% FTE project). null if not applicable/unknown.
+research_project_fraction_held: null
+
+# Your English test result status. Set to a string like "IELTS 7.5" once you have it, or
+# null if pending/not taken — a missing value always evaluates to "unknown", never "fail".
+english_test_result: null
+
+# The intake year you're targeting, e.g. 2027.
+target_intake_year: null
+
+# Whether you already have official transcripts + the institution's grading key in hand.
+has_transcripts: false
+
+# Whether you already have a confirmed supervisor agreement (feeds feasibility lead-time,
+# not a pass/fail gate — see spec §6.4).
+supervisor_confirmed: false
+
+# Whether you already hold/have completed a thesis, if relevant to the programmes you're
+# targeting.
+thesis_required: null
+
+# Your target degree level, e.g. "phd" or "masters" — compared against each award's
+# degree_level requirement.
+degree_level: null
+
+# Your nationality (as it would appear on an application), e.g. "Canadian". Several
+# schemes cannot produce a meaningful ELIGIBLE verdict until this is set — see spec §11.
+nationality: null
+
+# Whether you currently hold a prior research scholarship (only relevant while true —
+# see spec §4.1.1).
+prior_scholarship_exclusion: null
+
+# Your preference/status regarding a post-scholarship return obligation, if any programmes
+# you're considering impose one. This is a preference input you judge yourself — the tool
+# never decides it for you (spec §4.1.1).
+return_obligation: null
+
+# Your preference regarding funding component composition (e.g. stipend-only vs.
+# stipend+tuition), if relevant. Also a preference input, never auto-decided.
+funding_component: null

@@ -1,0 +1,16 @@
+# Copy this file to filter.yaml and set your real target. This drives automated
+# discovery: `optrack discover` looks up every institution in `country` from the vendored
+# directory (data/university_directory.json), then searches each one's own site for pages
+# matching degree_levels + fields. See spec §6.0, §4.3.
+
+name: canada-cs-phd            # a label for this filter, shown in discovery_run history
+country: Canada                 # required — must match a country name in the directory
+degree_levels: [phd]             # required — e.g. [phd], [masters], [phd, masters]
+fields: [computer science]        # required — used to build the search query per institution
+
+# Everything below is optional — leave null to not filter on it.
+funding_type: null                 # e.g. "fully funded"
+deadline_after: null                # ISO date, e.g. "2027-01-01" — ignore awards closing before this
+min_grade: null                      # informational only; grade comparison is never automated (spec §6.5)
+
+institution_cap: 50                   # max institutions searched per run; ~$1-1.50 in search cost at 50
