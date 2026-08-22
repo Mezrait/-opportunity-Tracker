@@ -1,0 +1,30 @@
+[
+  {
+    "name": "University of Toronto",
+    "country": "Canada",
+    "alpha_two_code": "CA",
+    "domains": ["utoronto.ca"],
+    "web_pages": ["https://www.utoronto.ca/"]
+  },
+  {
+    "name": "University of British Columbia",
+    "country": "Canada",
+    "alpha_two_code": "CA",
+    "domains": ["ubc.ca"],
+    "web_pages": ["https://www.ubc.ca/"]
+  },
+  {
+    "name": "McGill University",
+    "country": "Canada",
+    "alpha_two_code": "CA",
+    "domains": ["mcgill.ca"],
+    "web_pages": ["https://www.mcgill.ca/"]
+  },
+  {
+    "name": "University of Melbourne",
+    "country": "Australia",
+    "alpha_two_code": "AU",
+    "domains": ["unimelb.edu.au"],
+    "web_pages": ["https://www.unimelb.edu.au/"]
+  }
+]

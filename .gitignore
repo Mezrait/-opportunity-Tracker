@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+*.db
+data/*.db
+.pytest_cache/
+*.egg-info/
+
+# Operator-populated config. The *.example.yaml templates stay tracked; the real,
+# filled-in copies carry personal data (name, grades, nationality, test scores) and
+# must never be committed.
+profile.yaml
+filter.yaml
+seeds.yaml
+
+# Scraped page text and measured recall output -- regenerable, and third-party content.
+documents/
+data/gold_set_recall.json
