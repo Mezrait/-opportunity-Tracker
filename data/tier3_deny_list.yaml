@@ -1,0 +1,14 @@
+# Tier 3 deny-list (spec §5): domains observed publishing fabricated figures.
+# These are excluded from fetch ENTIRELY -- fetcher/pipeline.py records a `document` row
+# with fetch_status='error:denied_domain' and never requests the page at all, so their
+# content never enters the database in any form, not even as an unverified note.
+#
+# One bare registrable domain (or host) per line. Matching is exact and case-insensitive;
+# a denied domain does not automatically deny its subdomains, so list those separately if
+# needed. Empty list by default -- this is an operator-maintained exception list, added to
+# only when a specific domain has actually been observed publishing fabricated figures.
+#
+# Example:
+# - scam-scholarships.example
+# - fake-uni-list.example
+[]

@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from opportunity_tracker import tiering
+from opportunity_tracker import config, tiering
 from opportunity_tracker.fetcher import headless_fetch, http_fetch, pdf_fetch, robots
 from opportunity_tracker.models import Document, FetchMethod, SourceTier
 
@@ -38,6 +38,22 @@ def fetch(url: str, conn: sqlite3.Connection, declared_tier: int | None = None) 
     # regardless of suffix, so non-`.edu`-convention countries (Canada, most of the EU)
     # are not silently demoted to Tier 3 and thereby barred from writing any field at all.
     source_tier = tiering.classify_tier_for_url(domain, conn, declared_tier)
+
+    # Spec §5: deny-listed domains (observed publishing fabricated figures) are "excluded
+    # from fetch entirely" -- checked before robots.txt so not one byte of their content is
+    # ever requested, let alone stored. Still recorded as a `document` row: an excluded
+    # domain is data about the run, never a silent skip.
+    if tiering.is_denied(domain, tiering.load_deny_list(config.DENY_LIST_PATH)):
+        return _insert_document(
+            conn,
+            url=url,
+            source_tier=source_tier,
+            fetch_method=FetchMethod.HTTP,
+            content_hash="",
+            text_path=None,
+            fetch_status="error:denied_domain",
+            degraded=False,
+        )
 
     if not robots.is_allowed(url):
         return _insert_document(
@@ -65,11 +81,19 @@ def fetch(url: str, conn: sqlite3.Connection, declared_tier: int | None = None) 
             http_result = http_fetch.fetch_http(url)
         except Exception as exc:  # noqa: BLE001
             return _fetch_failed_document(conn, url, source_tier, FetchMethod.HTTP, exc)
+        if not _is_success_status(http_result.status_code):
+            return _http_status_document(
+                conn, url, source_tier, FetchMethod.HTTP, http_result.status_code
+            )
         if http_result.is_degraded:
             try:
                 headless_result = headless_fetch.fetch_headless(url)
             except Exception as exc:  # noqa: BLE001
                 return _fetch_failed_document(conn, url, source_tier, FetchMethod.HEADLESS, exc)
+            if not _is_success_status(headless_result.status_code):
+                return _http_status_document(
+                    conn, url, source_tier, FetchMethod.HEADLESS, headless_result.status_code
+                )
             text = headless_result.text
             fetch_method = FetchMethod.HEADLESS
             is_degraded = headless_result.is_degraded
@@ -90,6 +114,37 @@ def fetch(url: str, conn: sqlite3.Connection, declared_tier: int | None = None) 
         text_path=text_path,
         fetch_status="ok",
         degraded=is_degraded,
+    )
+
+
+def _is_success_status(status_code: int) -> bool:
+    return 200 <= status_code < 300
+
+
+def _http_status_document(
+    conn: sqlite3.Connection,
+    url: str,
+    source_tier: SourceTier,
+    fetch_method: FetchMethod,
+    status_code: int,
+) -> Document:
+    """Record a non-2xx response as a failed fetch.
+
+    `FetchResult.status_code` was previously captured and never read, so a 404 or 500 error
+    page -- typically well over the 200-character degraded threshold and carrying no loading
+    marker -- was stored as fetch_status='ok' and handed to the extractor as if it were real
+    scholarship content. Same treatment as every other failure path: a `document` row with
+    text_path=NULL and an error fetch_status, which extract-pending already knows to skip.
+    """
+    return _insert_document(
+        conn,
+        url=url,
+        source_tier=source_tier,
+        fetch_method=fetch_method,
+        content_hash="",
+        text_path=None,
+        fetch_status=f"error:http_status:{status_code}",
+        degraded=False,
     )
 
 

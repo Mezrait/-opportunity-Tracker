@@ -399,6 +399,11 @@ def run_command(
     format: str = typer.Option("md", "--format", help="Output format for the final report: 'md' or 'csv'."),
 ) -> None:
     """Run the full pipeline: discover -> fetch-pending -> extract-pending -> evaluate-all -> report."""
+    # `discover` syncs filter.yaml itself, but nothing else syncs profile.yaml -- and
+    # `evaluate-all` exits 1 when no profile row exists, so a fresh `optrack run` aborted at
+    # stage 4 every time. Sync it up front, mirroring how discover_command syncs the filter.
+    typer.echo("=== Stage 0/5: sync-profile ===")
+    sync_profile_command()
     typer.echo("=== Stage 1/5: discover ===")
     discover_command(rediscover=rediscover)
     typer.echo("=== Stage 2/5: fetch-pending ===")
