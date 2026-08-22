@@ -22,6 +22,7 @@ from urllib.parse import urljoin, urlparse
 
 import anthropic
 
+from opportunity_tracker import urls
 from opportunity_tracker.discovery import websearch
 from opportunity_tracker.extractor import evidence
 from opportunity_tracker.fetcher import pipeline
@@ -145,12 +146,20 @@ def _extract_same_domain_links(
     `base_url`. Links outside `registrable_domain`, and non-http(s) links
     (mailto:, tel:, javascript:, fragment-only anchors), are excluded -- the
     digger's crawl is bounded to a single registrable domain (spec section 6.3).
+
+    Scoping compares eTLD+1 to eTLD+1 (see opportunity_tracker.urls), so a crawl rooted at
+    `scholarships.uwa.edu.au` can still reach `uwa.edu.au/study/course-rules` -- the exact
+    UWA case the digger exists for -- while `notuwa.edu.au` stays excluded. A bare-host
+    comparison could not do both: it either barred the sibling subdomain or, with a naive
+    suffix trim, could not tell `.edu.au` from `.au`.
     """
     hrefs = [match.group(1) for match in _HREF_PATTERN.finditer(document_text)]
     hrefs += [
         match.group(0).rstrip(_URL_TRAILING_PUNCTUATION)
         for match in _BARE_URL_PATTERN.finditer(document_text)
     ]
+
+    scope = urls.registrable_domain(registrable_domain)
 
     links: list[str] = []
     seen: set[str] = set()
@@ -161,10 +170,7 @@ def _extract_same_domain_links(
         parsed = urlparse(absolute)
         if parsed.scheme not in ("http", "https"):
             continue
-        if not (
-            parsed.netloc == registrable_domain
-            or parsed.netloc.endswith("." + registrable_domain)
-        ):
+        if urls.registrable_domain(parsed.netloc) != scope:
             continue
         if absolute in seen:
             continue

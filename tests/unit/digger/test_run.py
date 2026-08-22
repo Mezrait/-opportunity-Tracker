@@ -222,6 +222,26 @@ def test_extract_same_domain_links_rejects_suffix_spoofed_lookalike():
     assert "https://uwa.edu.au/apply" in links
 
 
+def test_extract_same_domain_links_reaches_the_apex_from_a_subdomain_crawl():
+    """The motivating UWA case: an award hosted at scholarships.uwa.edu.au must be able to
+    follow links to uwa.edu.au's course-rules pages. A bare-netloc scope never could."""
+    document_text = (
+        '<a href="https://uwa.edu.au/study/course-rules">Course rules</a>'
+        '<a href="https://www.uwa.edu.au/scholarships">Scholarships</a>'
+        '<a href="https://notuwa.edu.au/apply">Lookalike</a>'
+    )
+
+    links = _extract_same_domain_links(
+        document_text,
+        base_url="https://scholarships.uwa.edu.au/rtp",
+        registrable_domain="scholarships.uwa.edu.au",
+    )
+
+    assert "https://uwa.edu.au/study/course-rules" in links
+    assert "https://www.uwa.edu.au/scholarships" in links
+    assert "https://notuwa.edu.au/apply" not in links
+
+
 def test_extract_same_domain_links_finds_bare_urls_in_extracted_text(mocker):
     """Stored document text is extracted VISIBLE text for every fetch method (Playwright
     inner_text, PDF text, and -- since the I2 fix -- BeautifulSoup-extracted HTTP text), so

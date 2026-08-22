@@ -387,3 +387,31 @@ def test_dig_passes_requirement_kind_enum_and_correct_registrable_domain(tmp_pat
     assert isinstance(captured["missing_kind"], RequirementKind)
     assert captured["missing_kind"] is RequirementKind.DEADLINE
     assert captured["registrable_domain"] == "uwa.edu.au"
+
+
+def test_dig_derives_an_etld_plus_one_not_a_bare_netloc(tmp_path, monkeypatch):
+    """urlparse().netloc keeps `www.` and every subdomain, so an award hosted at
+    scholarships.uwa.edu.au scoped the crawl to that host and could never reach
+    uwa.edu.au's course-rules pages -- the exact UWA case that motivated the tool."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    conn = _seed_db(tmp_path)
+    conn.execute(
+        "INSERT INTO award (scheme_id, institution, country, degree_levels, intake_year, "
+        "canonical_url) VALUES (NULL, 'UWA', 'AU', '[]', NULL, "
+        "'https://scholarships.uwa.edu.au/international-rtp')"
+    )
+    conn.commit()
+    conn.close()
+
+    captured = {}
+
+    def fake_dig(award_id, missing_kind, registrable_domain, conn_arg, api_key):
+        captured["registrable_domain"] = registrable_domain
+        return None
+
+    monkeypatch.setattr(digger_run, "dig", fake_dig)
+
+    result = runner.invoke(app, ["dig", "--award-id", "1", "--kind", "deadline"])
+    assert result.exit_code == 0, result.stdout
+    assert captured["registrable_domain"] == "uwa.edu.au"

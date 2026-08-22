@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlparse
 
 import typer
 
-from opportunity_tracker import config, db, directory, filters, profile
+from opportunity_tracker import config, db, directory, filters, profile, urls
 from opportunity_tracker.digger import run as digger_run
 from opportunity_tracker.discovery import run as discovery_run
 from opportunity_tracker.evaluator import run as evaluator_run
@@ -376,10 +375,12 @@ def dig_command(
         typer.echo(f"No award with id {award_id}.")
         conn.close()
         raise typer.Exit(code=1)
-    registrable_domain = urlparse(award_row["canonical_url"]).netloc
-    result = digger_run.dig(
-        award_id, RequirementKind(kind), registrable_domain, conn, api_key
-    )
+    # An actual registrable domain (eTLD+1), not urlparse().netloc: the bare host keeps
+    # `www.` and every subdomain, so an award at scholarships.uwa.edu.au could never let the
+    # digger's crawl reach uwa.edu.au's course-rules pages -- the exact UWA case that
+    # motivated the tool.
+    registrable = urls.registrable_domain(award_row["canonical_url"])
+    result = digger_run.dig(award_id, RequirementKind(kind), registrable, conn, api_key)
     if result is None:
         typer.echo(f"Digger found nothing for award {award_id}, kind '{kind}'.")
     else:
