@@ -79,25 +79,31 @@ def _extract_single_field(
     """Run a targeted, single-field version of the extractor prompt against
     `document_text`, looking only for `missing_kind`. Returns a candidate
     requirement dict (operator/value/unit/raw_text/evidence/confidence) if the
-    model reports finding it, or None if it reports not finding it, or if its
-    tool-call output could not be parsed.
+    model reports finding it, or None if it reports not finding it, if its
+    tool-call output could not be parsed, or if the API call itself failed
+    (rate limit, timeout, network blip, etc.) -- dig() must never raise, so a
+    transient LLM failure here is treated the same as "field not found on
+    this page" rather than propagated.
     """
     prompt = _build_single_field_prompt(missing_kind, document_text)
     client = anthropic.Anthropic(api_key=api_key)
 
-    response = client.messages.create(
-        model=_MODEL,
-        max_tokens=_MAX_TOKENS,
-        messages=[{"role": "user", "content": prompt}],
-        tools=[
-            {
-                "name": "record_requirement",
-                "description": "Record whether the target requirement was found.",
-                "input_schema": _SINGLE_FIELD_SCHEMA,
-            }
-        ],
-        tool_choice={"type": "tool", "name": "record_requirement"},
-    )
+    try:
+        response = client.messages.create(
+            model=_MODEL,
+            max_tokens=_MAX_TOKENS,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[
+                {
+                    "name": "record_requirement",
+                    "description": "Record whether the target requirement was found.",
+                    "input_schema": _SINGLE_FIELD_SCHEMA,
+                }
+            ],
+            tool_choice={"type": "tool", "name": "record_requirement"},
+        )
+    except Exception:
+        return None
 
     for block in getattr(response, "content", []):
         if getattr(block, "type", None) != "tool_use":
@@ -138,7 +144,10 @@ def _extract_same_domain_links(
         parsed = urlparse(absolute)
         if parsed.scheme not in ("http", "https"):
             continue
-        if not parsed.netloc.endswith(registrable_domain):
+        if not (
+            parsed.netloc == registrable_domain
+            or parsed.netloc.endswith("." + registrable_domain)
+        ):
             continue
         links.append(absolute)
     return links

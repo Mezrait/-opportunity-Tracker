@@ -2,7 +2,7 @@
 """Tests for the bounded digger. websearch.search_domain, fetcher.pipeline.fetch, and
 anthropic.Anthropic are all mocked -- this suite never calls a real search API,
 fetches over a real network, or calls a real LLM."""
-from opportunity_tracker.digger.run import dig
+from opportunity_tracker.digger.run import _extract_same_domain_links, dig
 from opportunity_tracker.models import Document, FetchMethod, RequirementKind, SourceTier
 
 
@@ -199,3 +199,61 @@ def test_dig_returns_none_when_budget_exhausted(mocker, tmp_path):
 
     assert requirement is None
     assert fetch_mock.call_count == 5
+
+
+def test_extract_same_domain_links_rejects_suffix_spoofed_lookalike():
+    document_text = (
+        '<html><body>'
+        '<a href="https://notuwa.edu.au/apply">Not actually UWA</a>'
+        '<a href="https://xuwa.edu.au/apply">Also not UWA</a>'
+        '<a href="https://apply.uwa.edu.au/apply">Real UWA subdomain</a>'
+        '<a href="https://uwa.edu.au/apply">Real UWA root domain</a>'
+        '</body></html>'
+    )
+
+    links = _extract_same_domain_links(
+        document_text, base_url="https://uwa.edu.au/", registrable_domain="uwa.edu.au"
+    )
+
+    assert "https://notuwa.edu.au/apply" not in links
+    assert "https://xuwa.edu.au/apply" not in links
+    assert "https://apply.uwa.edu.au/apply" in links
+    assert "https://uwa.edu.au/apply" in links
+
+
+def test_dig_does_not_raise_when_llm_call_fails(mocker, tmp_path):
+    """client.messages.create raising (rate limit, timeout, network blip) must
+    never propagate out of dig() -- the contract is 'never raise', with a
+    confirmed-not-found treated as ordinary data, not a crash."""
+    doc_text = "Some page text that never gets read by a working LLM call."
+    doc_path = tmp_path / "page.txt"
+    doc_path.write_text(doc_text, encoding="utf-8")
+
+    mocker.patch(
+        "opportunity_tracker.digger.run.websearch.search_domain",
+        return_value=[{"url": "https://uwa.edu.au/found", "title": "Deadlines"}],
+    )
+
+    homepage_doc = _make_document(1, doc_path, "https://uwa.edu.au/found")
+    fallback_homepage_doc = _make_document(2, doc_path, "https://uwa.edu.au/")
+    fetch_mock = mocker.patch(
+        "opportunity_tracker.digger.run.pipeline.fetch",
+        side_effect=[homepage_doc, fallback_homepage_doc],
+    )
+
+    fake_client = mocker.MagicMock()
+    fake_client.messages.create.side_effect = RuntimeError("transient API failure")
+    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+
+    conn = mocker.MagicMock()
+
+    requirement = dig(
+        award_id=7,
+        missing_kind=RequirementKind.DEADLINE,
+        registrable_domain="uwa.edu.au",
+        conn=conn,
+        api_key="sk-test",
+    )
+
+    assert requirement is None
+    assert fetch_mock.call_count == 2
