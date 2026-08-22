@@ -19,11 +19,21 @@ import anthropic
 from opportunity_tracker.extractor import evidence
 from opportunity_tracker.extractor.prompts import build_extraction_prompt
 from opportunity_tracker.extractor.schema import REQUIREMENT_JSON_SCHEMA
-from opportunity_tracker.models import Document, Requirement, RequirementKind
+from opportunity_tracker.models import Document, Requirement, RequirementKind, SourceTier
 
 _MODEL = "claude-opus-5"
 _MAX_TOKENS = 4096
 _TOOL_NAME = "record_requirements"
+
+# Principle 2 (spec §61-62): "Only Tier 1 sources write to fields. A field with no Tier 1
+# source remains NULL. Never averaged, never inferred, never filled from a lower-tier
+# source." This module and digger/run.py are the only two places in the system that INSERT
+# INTO requirement, so this is where that principle is mechanically enforced. A candidate
+# from a Tier 2/3 document is never inserted -- but it is never silently dropped either: it
+# is logged to `unclassified_rule` (surfaced by `optrack review-unclassified`) so the
+# operator can see what a lower-tier source claimed and, if it matters, chase down the
+# primary source or hand-verify it.
+_NON_TIER_1_PREFIX = "[tier-{tier} source, not written to requirement] "
 _RETRY_INSTRUCTION = (
     "\n\nYour previous response could not be parsed as a valid tool call. You MUST "
     "call the record_requirements tool exactly once with a single JSON object "
@@ -144,6 +154,7 @@ def extract_requirements(
     inserted: list[Requirement] = []
     extracted_at = datetime.now(timezone.utc).isoformat()
     valid_kinds = {k.value for k in RequirementKind}
+    is_tier_1 = document.source_tier == SourceTier.TIER_1
 
     for candidate in raw_requirements:
         if not isinstance(candidate, dict):
@@ -154,6 +165,22 @@ def extract_requirements(
         kind_value = candidate.get("kind")
 
         if not evidence.validate_evidence(evidence_text, document_text):
+            continue
+
+        if not is_tier_1:
+            # Principle 2 enforcement point -- see _NON_TIER_1_PREFIX above. Logged, never
+            # inserted, never silently dropped.
+            conn.execute(
+                "INSERT INTO unclassified_rule (document_id, raw_text, logged_at, "
+                "reviewed) VALUES (?, ?, ?, 0)",
+                (
+                    document.id,
+                    _NON_TIER_1_PREFIX.format(tier=document.source_tier.value)
+                    + f"{kind_value}: {raw_text}",
+                    extracted_at,
+                ),
+            )
+            conn.commit()
             continue
 
         if kind_value not in valid_kinds:

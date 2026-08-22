@@ -25,7 +25,7 @@ import anthropic
 from opportunity_tracker.discovery import websearch
 from opportunity_tracker.extractor import evidence
 from opportunity_tracker.fetcher import pipeline
-from opportunity_tracker.models import Document, Requirement, RequirementKind
+from opportunity_tracker.models import Document, Requirement, RequirementKind, SourceTier
 
 _MODEL = "claude-opus-5"
 _MAX_TOKENS = 1024
@@ -174,6 +174,26 @@ def _try_extract_and_insert(
         return None
 
     extracted_at = datetime.now(timezone.utc).isoformat()
+
+    if document.source_tier != SourceTier.TIER_1:
+        # Principle 2 (spec §61-62): only Tier 1 sources write to fields. The digger's
+        # crawl can wander onto a Tier 2/3 page (an aggregator mirror, a student blog
+        # linked from a faculty page); whatever it says there is logged for review, never
+        # written into `requirement` as if it were verified primary-source data. Logged,
+        # not dropped -- the operator sees it via `optrack review-unclassified`.
+        conn.execute(
+            "INSERT INTO unclassified_rule (document_id, raw_text, logged_at, reviewed) "
+            "VALUES (?, ?, ?, 0)",
+            (
+                document.id,
+                f"[tier-{document.source_tier.value} source, not written to requirement] "
+                f"{missing_kind.value}: {candidate['raw_text']}",
+                extracted_at,
+            ),
+        )
+        conn.commit()
+        return None
+
     cursor = conn.execute(
         "INSERT INTO requirement (award_id, document_id, kind, operator, value, "
         "unit, raw_text, evidence, confidence, extracted_at, human_verified) "

@@ -23,7 +23,7 @@ def conn():
 def test_fetch_plain_http_success(mocker, conn, tmp_path):
     mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
     mocker.patch(
-        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier_for_url",
         return_value=SourceTier.TIER_1,
     )
     mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)
@@ -58,7 +58,7 @@ def test_fetch_plain_http_success(mocker, conn, tmp_path):
 def test_fetch_degraded_http_falls_back_to_headless(mocker, conn, tmp_path):
     mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
     mocker.patch(
-        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier_for_url",
         return_value=SourceTier.TIER_1,
     )
     mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)
@@ -87,7 +87,7 @@ def test_fetch_degraded_http_falls_back_to_headless(mocker, conn, tmp_path):
 def test_fetch_robots_disallowed_still_inserts_document_row(mocker, conn, tmp_path):
     mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
     mocker.patch(
-        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier_for_url",
         return_value=SourceTier.TIER_1,
     )
     mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=False)
@@ -112,7 +112,7 @@ def test_fetch_robots_disallowed_still_inserts_document_row(mocker, conn, tmp_pa
 def test_fetch_http_exception_still_inserts_document_row(mocker, conn, tmp_path):
     mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
     mocker.patch(
-        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier_for_url",
         return_value=SourceTier.TIER_1,
     )
     mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)
@@ -140,7 +140,7 @@ def test_fetch_http_exception_still_inserts_document_row(mocker, conn, tmp_path)
 def test_fetch_headless_exception_still_inserts_document_row(mocker, conn, tmp_path):
     mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
     mocker.patch(
-        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier_for_url",
         return_value=SourceTier.TIER_1,
     )
     mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)
@@ -170,7 +170,7 @@ def test_fetch_headless_exception_still_inserts_document_row(mocker, conn, tmp_p
 def test_fetch_pdf_extraction_exception_still_inserts_document_row(mocker, conn, tmp_path):
     mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
     mocker.patch(
-        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier_for_url",
         return_value=SourceTier.TIER_1,
     )
     mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)
@@ -200,7 +200,7 @@ def test_fetch_pdf_extraction_exception_still_inserts_document_row(mocker, conn,
 def test_fetch_pdf_url_extracts_text_via_pdf_fetch(mocker, conn, tmp_path):
     mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
     mocker.patch(
-        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier_for_url",
         return_value=SourceTier.TIER_1,
     )
     mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)

@@ -33,11 +33,11 @@ def conn():
     connection.close()
 
 
-def _make_document(text_path: str) -> Document:
+def _make_document(text_path: str, source_tier: SourceTier = SourceTier.TIER_1) -> Document:
     return Document(
         id=1,
         url="https://uwa.edu.au/rules",
-        source_tier=SourceTier.TIER_1,
+        source_tier=source_tier,
         fetch_method=FetchMethod.HTTP,
         content_hash="abc123",
         text_path=text_path,
@@ -206,6 +206,79 @@ def test_both_calls_unparseable_returns_extraction_failed(mocker, conn, tmp_path
     assert requirements == []
     assert extraction_failed is True
     assert fake_client.messages.create.call_count == 2
+
+
+# --- Principle 2: only Tier 1 sources write to fields (whole-branch review C1) -------------
+
+@pytest.mark.parametrize("tier", [SourceTier.TIER_2, SourceTier.TIER_3])
+def test_non_tier_1_document_logs_instead_of_writing_requirement(mocker, conn, tmp_path, tier):
+    doc_path = tmp_path / "doc.txt"
+    doc_path.write_text("Applications close 15 March 2027.", encoding="utf-8")
+    document = _make_document(str(doc_path), source_tier=tier)
+
+    fake_client = mocker.MagicMock()
+    fake_client.messages.create.return_value = _good_response(
+        [
+            {
+                "kind": "deadline",
+                "operator": None,
+                "value": "2027-03-15",
+                "unit": None,
+                "raw_text": "Applications close 15 March 2027.",
+                "evidence": "Applications close 15 March 2027.",
+                "confidence": 0.9,
+            }
+        ]
+    )
+    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch(
+        "opportunity_tracker.extractor.evidence.validate_evidence", return_value=True
+    )
+
+    requirements, extraction_failed = extract_requirements(
+        document, award_id=1, conn=conn, api_key="sk-test"
+    )
+
+    assert extraction_failed is False
+    assert requirements == []
+    assert conn.execute("SELECT COUNT(*) AS n FROM requirement").fetchone()["n"] == 0
+
+    # Never silently dropped -- visible via `optrack review-unclassified`.
+    logged = conn.execute("SELECT document_id, raw_text FROM unclassified_rule").fetchall()
+    assert len(logged) == 1
+    assert logged[0]["document_id"] == document.id
+    assert f"tier-{tier.value}" in logged[0]["raw_text"]
+    assert "Applications close 15 March 2027." in logged[0]["raw_text"]
+
+
+def test_tier_1_document_still_writes_requirement(mocker, conn, tmp_path):
+    doc_path = tmp_path / "doc.txt"
+    doc_path.write_text("Applications close 15 March 2027.", encoding="utf-8")
+    document = _make_document(str(doc_path), source_tier=SourceTier.TIER_1)
+
+    fake_client = mocker.MagicMock()
+    fake_client.messages.create.return_value = _good_response(
+        [
+            {
+                "kind": "deadline",
+                "operator": None,
+                "value": "2027-03-15",
+                "unit": None,
+                "raw_text": "Applications close 15 March 2027.",
+                "evidence": "Applications close 15 March 2027.",
+                "confidence": 0.9,
+            }
+        ]
+    )
+    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch(
+        "opportunity_tracker.extractor.evidence.validate_evidence", return_value=True
+    )
+
+    requirements, _ = extract_requirements(document, award_id=1, conn=conn, api_key="sk-test")
+
+    assert len(requirements) == 1
+    assert conn.execute("SELECT COUNT(*) AS n FROM unclassified_rule").fetchone()["n"] == 0
 
 
 def test_extract_requirements_raw_returns_validated_candidate_dicts_no_db(mocker):

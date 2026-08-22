@@ -2,6 +2,7 @@
 """Tests for the bounded digger. websearch.search_domain, fetcher.pipeline.fetch, and
 anthropic.Anthropic are all mocked -- this suite never calls a real search API,
 fetches over a real network, or calls a real LLM."""
+from opportunity_tracker.db import get_connection, init_db
 from opportunity_tracker.digger.run import _extract_same_domain_links, dig
 from opportunity_tracker.models import Document, FetchMethod, RequirementKind, SourceTier
 
@@ -51,11 +52,11 @@ def _not_found_response():
     )
 
 
-def _make_document(doc_id, text_path, url):
+def _make_document(doc_id, text_path, url, source_tier=SourceTier.TIER_1):
     return Document(
         id=doc_id,
         url=url,
-        source_tier=SourceTier.TIER_1,
+        source_tier=source_tier,
         fetch_method=FetchMethod.HTTP,
         content_hash=f"hash-{doc_id}",
         text_path=str(text_path),
@@ -257,3 +258,56 @@ def test_dig_does_not_raise_when_llm_call_fails(mocker, tmp_path):
 
     assert requirement is None
     assert fetch_mock.call_count == 2
+
+
+# --- Principle 2: only Tier 1 sources write to fields (whole-branch review C1) -------------
+
+def test_dig_never_writes_a_requirement_from_a_non_tier_1_document(mocker, tmp_path):
+    """The digger's crawl can wander onto an aggregator mirror or a student blog linked
+    from a faculty page. Whatever it says is logged for review, never written to
+    `requirement` as if it were verified primary-source data (spec principle 2)."""
+    doc_text = "The application deadline for the 2027 intake is 15 March 2027."
+    doc_path = tmp_path / "tier3.txt"
+    doc_path.write_text(doc_text, encoding="utf-8")
+
+    conn = get_connection(":memory:")
+    init_db(conn)
+    conn.execute(
+        "INSERT INTO document (url, source_tier, fetch_method, content_hash, text_path, "
+        "retrieved_at, fetch_status, degraded) VALUES "
+        "('https://aggregator.example/found', 3, 'http', 'h', ?, "
+        "'2026-08-22T00:00:00+00:00', 'ok', 0)",
+        (str(doc_path),),
+    )
+    conn.commit()
+
+    tier3_doc = _make_document(
+        1, doc_path, "https://aggregator.example/found", source_tier=SourceTier.TIER_3
+    )
+    mocker.patch(
+        "opportunity_tracker.digger.run.websearch.search_domain",
+        return_value=[{"url": "https://aggregator.example/found", "title": "Deadlines"}],
+    )
+    mocker.patch("opportunity_tracker.digger.run.pipeline.fetch", return_value=tier3_doc)
+
+    fake_client = mocker.MagicMock()
+    fake_client.messages.create.return_value = _found_response(
+        operator="=", value="2027-03-15", raw_text=doc_text, evidence=doc_text, confidence=0.9
+    )
+    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+
+    requirement = dig(
+        award_id=7,
+        missing_kind=RequirementKind.DEADLINE,
+        registrable_domain="aggregator.example",
+        conn=conn,
+        api_key="sk-test",
+    )
+
+    assert requirement is None
+    assert conn.execute("SELECT COUNT(*) AS n FROM requirement").fetchone()["n"] == 0
+    logged = conn.execute("SELECT raw_text FROM unclassified_rule").fetchall()
+    assert logged, "a Tier 3 finding must be logged for review, never silently dropped"
+    assert "tier-3" in logged[0]["raw_text"]
+    assert "deadline" in logged[0]["raw_text"]
+    conn.close()

@@ -34,7 +34,10 @@ DOCUMENTS_DIR = Path("documents")
 def fetch(url: str, conn: sqlite3.Connection, declared_tier: int | None = None) -> Document:
     """Fetch `url`, hash and persist its text, and insert+return a `document` row."""
     domain = urlparse(url).netloc
-    source_tier = tiering.classify_tier(domain, declared_tier)
+    # Directory-aware classification (spec §5): a loaded institution's own domain is Tier 1
+    # regardless of suffix, so non-`.edu`-convention countries (Canada, most of the EU)
+    # are not silently demoted to Tier 3 and thereby barred from writing any field at all.
+    source_tier = tiering.classify_tier_for_url(domain, conn, declared_tier)
 
     if not robots.is_allowed(url):
         return _insert_document(
