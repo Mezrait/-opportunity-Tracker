@@ -140,3 +140,50 @@ def test_informational_boolean_kind_uses_same_rule():
     requirement = _make_requirement(RequirementKind.RETURN_OBLIGATION, value="true")
     profile = _make_profile({"return_obligation": "true"})
     assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+def test_boolean_kind_degree_level_matches_profile():
+    # Proves _BOOLEAN_KIND_ATTRIBUTES[DEGREE_LEVEL] == "degree_level" actually wires to a
+    # real profile attribute lookup -- a typo here would silently strand this kind at
+    # permanent UNKNOWN with no test catching it.
+    requirement = _make_requirement(RequirementKind.DEGREE_LEVEL, value="phd")
+    profile = _make_profile({"degree_level": "phd"})
+    assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+def test_boolean_kind_supervisor_required_matches_profile():
+    requirement = _make_requirement(RequirementKind.SUPERVISOR_REQUIRED, value="true")
+    profile = _make_profile({"supervisor_required": "true"})
+    assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+def test_boolean_kind_prior_scholarship_exclusion_matches_profile():
+    requirement = _make_requirement(
+        RequirementKind.PRIOR_SCHOLARSHIP_EXCLUSION, value="true"
+    )
+    profile = _make_profile({"prior_scholarship_exclusion": "true"})
+    assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+def test_boolean_kind_funding_component_matches_profile():
+    requirement = _make_requirement(RequirementKind.FUNDING_COMPONENT, value="stipend")
+    profile = _make_profile({"funding_component": "stipend"})
+    assert evaluate_requirement(requirement, profile) == Outcome.PASS
+
+
+# --- Fix: RESEARCH_PROJECT_FRACTION float() conversion must degrade to UNKNOWN, not raise ---
+
+def test_research_project_fraction_unknown_when_requirement_value_non_numeric():
+    requirement = _make_requirement(
+        RequirementKind.RESEARCH_PROJECT_FRACTION, operator=">=", value="not-a-number"
+    )
+    profile = _make_profile({"research_project_fraction_held": 0.30})
+    assert evaluate_requirement(requirement, profile) == Outcome.UNKNOWN
+
+
+def test_research_project_fraction_unknown_when_requirement_value_is_none():
+    requirement = _make_requirement(
+        RequirementKind.RESEARCH_PROJECT_FRACTION, operator=">=", value=None
+    )
+    profile = _make_profile({"research_project_fraction_held": 0.30})
+    assert evaluate_requirement(requirement, profile) == Outcome.UNKNOWN

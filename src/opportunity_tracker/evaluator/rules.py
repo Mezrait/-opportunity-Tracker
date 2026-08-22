@@ -41,8 +41,11 @@ def evaluate_requirement(requirement: Requirement | None, profile: Profile) -> O
         compare = _COMPARATORS.get(requirement.operator)
         if compare is None:
             return Outcome.UNKNOWN
-        held_value = float(held)
-        required_value = float(requirement.value)
+        try:
+            held_value = float(held)
+            required_value = float(requirement.value)
+        except (TypeError, ValueError):
+            return Outcome.UNKNOWN
         return Outcome.PASS if compare(held_value, required_value) else Outcome.FAIL
 
     if kind == RequirementKind.ENGLISH_TEST:
