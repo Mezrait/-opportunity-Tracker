@@ -2,33 +2,9 @@
 near-empty shell to a plain GET. See spec §6.1."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from playwright.sync_api import sync_playwright
 
-
-# TODO: Once Task 10 (http_fetch.py) is merged, replace this with:
-# from opportunity_tracker.fetcher.http_fetch import DEFAULT_LOADING_MARKERS, FetchResult
-@dataclass
-class FetchResult:
-    """Result of a fetch operation.
-
-    Fields:
-        text: The extracted text content from the page
-        status_code: HTTP status code (or 200 for file:// URLs)
-        is_degraded: True if content appears incomplete or shows loading markers
-    """
-    text: str
-    status_code: int
-    is_degraded: bool
-
-
-# Marker strings that indicate a page is still loading its content component
-DEFAULT_LOADING_MARKERS = [
-    "Loading component...",
-    "Loading...",
-    "loading",
-]
+from opportunity_tracker.fetcher.http_fetch import DEFAULT_LOADING_MARKERS, FetchResult
 
 
 def fetch_headless(url: str, min_content_length: int = 200) -> FetchResult:
