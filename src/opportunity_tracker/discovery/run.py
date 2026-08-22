@@ -33,6 +33,7 @@ def _row_to_discovery_run(row: sqlite3.Row) -> DiscoveryRun:
         institutions_with_candidates=row["institutions_with_candidates"],
         searches_used=row["searches_used"],
         status=DiscoveryRunStatus(row["status"]),
+        institutions_available=row["institutions_available"],
     )
 
 
@@ -68,6 +69,16 @@ def run_discovery(
     misses are logged, not silent. It is simply excluded from
     `institutions_with_candidates`. The row is updated to status='completed'
     once every institution has been processed.
+
+    `institutions_available` records how many institutions the directory listed for the
+    country BEFORE the cap truncated the list. Institutions past the cap are never
+    searched and never recorded as NO_CANDIDATE_FOUND -- they are simply absent -- so
+    without this number the report's coverage table presents a partial run as a complete
+    one. The reporter renders considered/available so a capped run is visibly partial.
+
+    `searches_used` records the actual number of server-side web_search requests billed,
+    read from the API response's usage block, not one-per-institution: each call is made
+    with max_uses=3, so a flat +1 undercounted the cost audit trail (spec §4.3) by up to 3x.
     """
     if not force_rediscover:
         reusable = _find_reusable_run(conn, filter_obj)
@@ -77,15 +88,22 @@ def run_discovery(
     started_at = _now_iso()
     cursor = conn.execute(
         "INSERT INTO discovery_run (filter_id, filter_content_hash, started_at, "
-        "completed_at, institutions_considered, institutions_with_candidates, "
-        "searches_used, status) VALUES (?, ?, ?, NULL, 0, 0, 0, ?)",
+        "completed_at, institutions_considered, institutions_available, "
+        "institutions_with_candidates, searches_used, status) "
+        "VALUES (?, ?, ?, NULL, 0, 0, 0, 0, ?)",
         (filter_obj.id, filter_obj.content_hash, started_at, DiscoveryRunStatus.RUNNING.value),
     )
     conn.commit()
     run_id = cursor.lastrowid
 
-    institutions = directory.list_institutions(conn, filter_obj.country)
-    institutions = institutions[: filter_obj.institution_cap]
+    available_institutions = directory.list_institutions(conn, filter_obj.country)
+    institutions_available = len(available_institutions)
+    institutions = available_institutions[: filter_obj.institution_cap]
+    conn.execute(
+        "UPDATE discovery_run SET institutions_available = ? WHERE id = ?",
+        (institutions_available, run_id),
+    )
+    conn.commit()
 
     institutions_considered = 0
     institutions_with_candidates = 0
@@ -104,7 +122,10 @@ def run_discovery(
             # deletion. The institution is still counted above; it's simply
             # excluded from institutions_with_candidates below.
             results = []
-        searches_used += 1
+        # Actual billed server-side searches for this call, not a flat +1. search_institution
+        # attaches the count read from the response's usage block; a mock or a failed call
+        # that returns a plain list falls back to 1, the old behaviour.
+        searches_used += websearch.searches_used_by(results)
 
         if results:
             institutions_with_candidates += 1
@@ -138,13 +159,23 @@ def ingest_manual_pins(seeds_yaml_path: str, conn: sqlite3.Connection) -> list[i
 
     Each seed is a mapping with at least `institution_domain` and `url`; it may
     optionally carry `name`, `country`, `country_code` to fill in a new
-    institution row. The institution is looked up by domain; if missing, it's
-    created with source=InstitutionSource.MANUAL, defaulting `name` to the
-    domain and `country`/`country_code` to "Unknown"/"XX" when not given in
-    the seed. Every inserted candidate has discovery_run_id=NULL and
-    query_used='manual_pin', and is never deduplicated against discovery
-    results -- a pin always represents explicit operator intent (spec section
-    4.3). Returns the list of newly-inserted candidate ids, in seed order.
+    institution row, and `declared_tier` to override automatic domain
+    classification for that URL (spec §5 -- how `cybersure-master.eu`, an
+    official Erasmus Mundus site matching no academic suffix, resolves Tier 1).
+    The institution is looked up by domain; if missing, it's created with
+    source=InstitutionSource.MANUAL, defaulting `name` to the domain and
+    `country`/`country_code` to "Unknown"/"XX" when not given in the seed.
+    Every inserted candidate has discovery_run_id=NULL and
+    query_used='manual_pin'.
+
+    A pin whose URL already has a `candidate` row -- from an earlier run's
+    ingest, or from discovery -- is SKIPPED rather than re-inserted. This
+    function is called unconditionally on every `optrack run`, so without the
+    check each run inserted a fresh candidate per pin, and every one of those
+    triggered a full re-fetch, a re-extraction, and a duplicate set of
+    `requirement` rows for a page that had not changed. Returns the list of
+    newly-inserted candidate ids, in seed order; an already-known pin
+    contributes nothing to that list.
     """
     with open(seeds_yaml_path, "r", encoding="utf-8") as f:
         seeds = yaml.safe_load(f) or []
@@ -154,6 +185,12 @@ def ingest_manual_pins(seeds_yaml_path: str, conn: sqlite3.Connection) -> list[i
     for seed in seeds:
         domain = seed["institution_domain"]
         url = seed["url"]
+
+        existing_candidate = conn.execute(
+            "SELECT id FROM candidate WHERE url = ? LIMIT 1", (url,)
+        ).fetchone()
+        if existing_candidate is not None:
+            continue
 
         institution_row = conn.execute(
             "SELECT id FROM institution WHERE domain = ?", (domain,)
@@ -176,11 +213,17 @@ def ingest_manual_pins(seeds_yaml_path: str, conn: sqlite3.Connection) -> list[i
         else:
             institution_id = institution_row["id"]
 
+        declared_tier = seed.get("declared_tier")
         cursor = conn.execute(
             "INSERT INTO candidate (discovery_run_id, institution_id, url, "
-            "query_used, found_at, promoted_to_award_id) VALUES "
-            "(NULL, ?, ?, 'manual_pin', ?, NULL)",
-            (institution_id, url, _now_iso()),
+            "query_used, found_at, promoted_to_award_id, declared_tier) VALUES "
+            "(NULL, ?, ?, 'manual_pin', ?, NULL, ?)",
+            (
+                institution_id,
+                url,
+                _now_iso(),
+                None if declared_tier is None else int(declared_tier),
+            ),
         )
         new_candidate_ids.append(cursor.lastrowid)
         conn.commit()

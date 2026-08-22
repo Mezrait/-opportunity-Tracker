@@ -124,6 +124,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         started_at TEXT NOT NULL,
         completed_at TEXT,
         institutions_considered INTEGER NOT NULL DEFAULT 0,
+        institutions_available INTEGER NOT NULL DEFAULT 0,
         institutions_with_candidates INTEGER NOT NULL DEFAULT 0,
         searches_used INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL CHECK (status IN ({_sql_list(DiscoveryRunStatus)}))
@@ -136,7 +137,27 @@ def init_db(conn: sqlite3.Connection) -> None:
         url TEXT NOT NULL,
         query_used TEXT NOT NULL,
         found_at TEXT NOT NULL,
-        promoted_to_award_id INTEGER REFERENCES award(id)
+        promoted_to_award_id INTEGER REFERENCES award(id),
+        declared_tier INTEGER
     );
     """)
+
+    # Pre-release, so the CREATE TABLE statements above carry the current shape and there
+    # are no numbered migrations. These guarded ADD COLUMNs exist only so a database file
+    # created by an earlier build picks up the new columns instead of failing on the first
+    # query that names one; CREATE TABLE IF NOT EXISTS would leave such a file untouched.
+    # Idempotent, so init_db stays safe to run on every command.
+    _add_column_if_missing(
+        conn, "discovery_run", "institutions_available", "INTEGER NOT NULL DEFAULT 0"
+    )
+    _add_column_if_missing(conn, "candidate", "declared_tier", "INTEGER")
+
     conn.commit()
+
+
+def _add_column_if_missing(
+    conn: sqlite3.Connection, table: str, column: str, column_definition: str
+) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_definition}")

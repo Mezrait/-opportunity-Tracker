@@ -302,6 +302,65 @@ def test_extract_pending_passes_document_instance_and_unpacks_tuple(tmp_path, mo
     assert "FAILED" in result.stdout
 
 
+# --- Whole-branch review I9: the seed tier-override must reach the fetcher ----------------
+
+def test_fetch_pending_passes_candidate_declared_tier_to_the_fetcher(tmp_path, monkeypatch):
+    """Spec §5's mandatory regression case: cybersure-master.eu matches no academic suffix
+    and is in no institution directory, so it resolves Tier 1 only via the seed override --
+    which was unreachable at runtime because no caller ever passed declared_tier."""
+    monkeypatch.chdir(tmp_path)
+    conn = _seed_db(tmp_path)
+    conn.execute(
+        "INSERT INTO institution (name, country, country_code, domain, source, "
+        "directory_version, added_at) VALUES ('CyberSure', 'Unknown', 'XX', "
+        "'cybersure-master.eu', 'manual', NULL, '2026-08-22T00:00:00+00:00')"
+    )
+    conn.execute(
+        "INSERT INTO candidate (discovery_run_id, institution_id, url, query_used, "
+        "found_at, promoted_to_award_id, declared_tier) VALUES "
+        "(NULL, 1, 'https://www.cybersure-master.eu/admission', 'manual_pin', "
+        "'2026-08-22T00:00:00+00:00', NULL, 1)"
+    )
+    conn.execute(
+        "INSERT INTO candidate (discovery_run_id, institution_id, url, query_used, "
+        "found_at, promoted_to_award_id, declared_tier) VALUES "
+        "(NULL, 1, 'https://www.cybersure-master.eu/other', 'manual_pin', "
+        "'2026-08-22T00:00:00+00:00', NULL, NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    captured = {}
+
+    def fake_fetch(url, conn_arg, declared_tier=None):
+        captured[url] = declared_tier
+        cursor = conn_arg.execute(
+            "INSERT INTO document (url, source_tier, fetch_method, content_hash, "
+            "text_path, retrieved_at, fetch_status, degraded) VALUES "
+            "(?, ?, 'http', 'hash', 'docs/x.txt', '2026-08-22T00:00:00+00:00', 'ok', 0)",
+            (url, declared_tier or 3),
+        )
+        conn_arg.commit()
+        return Document(
+            id=cursor.lastrowid,
+            url=url,
+            source_tier=SourceTier(declared_tier or 3),
+            fetch_method=FetchMethod.HTTP,
+            content_hash="hash",
+            text_path="docs/x.txt",
+            retrieved_at="2026-08-22T00:00:00+00:00",
+            fetch_status="ok",
+            degraded=False,
+        )
+
+    monkeypatch.setattr(fetcher_pipeline, "fetch", fake_fetch)
+
+    result = runner.invoke(app, ["fetch-pending"])
+    assert result.exit_code == 0, result.stdout
+    assert captured["https://www.cybersure-master.eu/admission"] == 1
+    assert captured["https://www.cybersure-master.eu/other"] is None
+
+
 def test_dig_passes_requirement_kind_enum_and_correct_registrable_domain(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")

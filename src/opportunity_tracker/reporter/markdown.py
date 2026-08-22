@@ -133,14 +133,31 @@ def render_report(
         lines.append("_No discovery runs recorded._")
     else:
         lines.append(
-            "| Filter ID | Considered | With Candidates | No Candidate Found | Searches Used |"
+            "| Filter ID | Considered / Available | With Candidates | No Candidate Found "
+            "| Searches Used | Coverage |"
         )
-        lines.append("|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|")
         for run in discovery_runs:
             no_candidate = run.institutions_considered - run.institutions_with_candidates
+            # filter.institution_cap truncates the directory listing before discovery runs,
+            # so institutions past the cap are never searched and never recorded as
+            # NO_CANDIDATE_FOUND -- they are simply absent. Showing considered/available
+            # (and flagging the shortfall) is what keeps a capped run from reading as a
+            # complete one; spec principle 7, a miss is logged, never silent.
+            available = run.institutions_available
+            if available > run.institutions_considered:
+                coverage = (
+                    f"**partial — capped, {available - run.institutions_considered} "
+                    "institution(s) not searched**"
+                )
+            elif available == 0:
+                coverage = "unknown (not recorded)"
+            else:
+                coverage = "complete"
             lines.append(
-                f"| {run.filter_id} | {run.institutions_considered} | "
-                f"{run.institutions_with_candidates} | {no_candidate} | {run.searches_used} |"
+                f"| {run.filter_id} | {run.institutions_considered} / {available} | "
+                f"{run.institutions_with_candidates} | {no_candidate} | "
+                f"{run.searches_used} | {coverage} |"
             )
     lines.append("")
 

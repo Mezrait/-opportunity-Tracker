@@ -191,6 +191,10 @@ class DiscoveryRun:
     institutions_with_candidates: int
     searches_used: int
     status: DiscoveryRunStatus
+    # Total institutions the directory lists for the filter's country, BEFORE
+    # filter.institution_cap truncates the list. Without it a capped run reports partial
+    # coverage as if it were complete (spec principle 7: a miss is logged, never silent).
+    institutions_available: int = 0
 
 
 @dataclass(frozen=True)
@@ -202,3 +206,6 @@ class Candidate:
     query_used: str
     found_at: str
     promoted_to_award_id: int | None
+    # Operator-declared source tier from seeds.yaml, overriding automatic domain
+    # classification for a manually-pinned URL (spec §5). NULL for discovered candidates.
+    declared_tier: int | None = None

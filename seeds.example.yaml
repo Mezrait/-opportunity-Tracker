@@ -2,8 +2,25 @@
 # for opportunities you already know about that discovery might miss (directory gaps,
 # search misses). Pinned entries flow through the same fetch/extract/evaluate pipeline as
 # discovered ones. See spec §4.3, §6.0.
+#
+# Each entry needs `institution_domain` and `url`. Optional keys:
+#   name, country, country_code   fill in a new `institution` row if the domain is unknown
+#   declared_tier                 1, 2 or 3 — overrides automatic domain classification
+#
+# `declared_tier` exists because suffix matching cannot recognise every legitimate
+# primary source (spec §5). Use it only for a site you have verified is the awarding
+# body's own: a Tier 1 declaration is what allows that page to write fields at all
+# (principle 2), so a wrong declaration lets unverified data in as if it were primary.
+# Re-ingesting is safe — a pin whose URL already has a candidate row is skipped, not
+# re-fetched.
 
 - institution_domain: uwa.edu.au
   url: https://www.uwa.edu.au/study/scholarships/international-rtp
+
+# An official Erasmus Mundus consortium site: matches no academic suffix and appears in
+# no institution directory, so automatic classification would put it at Tier 3 and it
+# could never write a field. This is the spec's own worked example (§5, §9.1).
 - institution_domain: cybersure-master.eu
   url: https://www.cybersure-master.eu/admission
+  name: CyberSure Erasmus Mundus Joint Master
+  declared_tier: 1

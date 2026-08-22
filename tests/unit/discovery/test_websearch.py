@@ -1,6 +1,11 @@
 """Tests for the Claude web_search wrapper. anthropic.Anthropic is mocked entirely --
 this suite never calls the real Anthropic API."""
-from opportunity_tracker.discovery.websearch import build_query, search_domain, search_institution
+from opportunity_tracker.discovery.websearch import (
+    build_query,
+    search_domain,
+    search_institution,
+    searches_used_by,
+)
 from opportunity_tracker.models import Filter, Institution, InstitutionSource
 
 
@@ -116,6 +121,68 @@ def test_search_institution_handles_server_tool_error_block(mocker):
     results = search_institution(_make_institution(), _make_filter(), api_key="sk-test")
 
     assert results == []
+
+
+# --- Whole-branch review I5: the billed search count comes off the response's usage ------
+
+class _FakeServerToolUse:
+    def __init__(self, web_search_requests):
+        self.web_search_requests = web_search_requests
+
+
+class _FakeUsage:
+    def __init__(self, web_search_requests):
+        self.server_tool_use = _FakeServerToolUse(web_search_requests)
+
+
+def test_search_institution_reports_billed_search_count_from_usage(mocker):
+    response = _FakeResponse(content=[
+        _FakeContentBlock("web_search_tool_result", [
+            _FakeResultItem("https://uwa.edu.au/scholarships/rtp", "RTP Scholarship"),
+        ]),
+    ])
+    response.usage = _FakeUsage(3)  # one call, max_uses=3, three searches actually billed
+    fake_client = mocker.MagicMock()
+    fake_client.messages.create.return_value = response
+    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+
+    results = search_institution(_make_institution(), _make_filter(), api_key="sk-test")
+
+    assert searches_used_by(results) == 3
+    assert results == [{"url": "https://uwa.edu.au/scholarships/rtp", "title": "RTP Scholarship"}]
+
+
+def test_search_institution_falls_back_to_one_when_usage_is_absent(mocker):
+    # A response with no usage block (or a mocked one) must not break discovery.
+    fake_client = mocker.MagicMock()
+    fake_client.messages.create.return_value = _FakeResponse(content=[])
+    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+
+    results = search_institution(_make_institution(), _make_filter(), api_key="sk-test")
+
+    assert searches_used_by(results) == 1
+
+
+def test_searches_used_by_falls_back_to_one_for_a_plain_list():
+    assert searches_used_by([]) == 1
+    assert searches_used_by([{"url": "https://x.example", "title": "x"}]) == 1
+
+
+def test_search_domain_also_reports_its_billed_search_count(mocker):
+    response = _FakeResponse(content=[
+        _FakeContentBlock(
+            "web_search_tool_result",
+            [_FakeResultItem("https://uwa.edu.au/rules/deadline", "Deadline")],
+        )
+    ])
+    response.usage = _FakeUsage(1)
+    fake_client = mocker.MagicMock()
+    fake_client.messages.create.return_value = response
+    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+
+    results = search_domain("uwa.edu.au", "application deadline", api_key="sk-test")
+
+    assert searches_used_by(results) == 1
 
 
 def test_search_domain_scopes_tools_to_bare_domain_and_returns_results(mocker):

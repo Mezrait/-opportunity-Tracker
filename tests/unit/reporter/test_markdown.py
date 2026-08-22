@@ -149,23 +149,57 @@ def test_render_report_handles_no_evaluations():
     conn.close()
 
 
-def test_render_report_discovery_coverage_summary():
-    conn = get_connection(":memory:")
-    init_db(conn)
-    run = DiscoveryRun(
+def _make_discovery_run(considered=42, with_candidates=30, available=42, searches_used=90):
+    return DiscoveryRun(
         id=1,
         filter_id=1,
         filter_content_hash="hash123",
         started_at="2026-08-22T00:00:00",
         completed_at="2026-08-22T00:10:00",
-        institutions_considered=42,
-        institutions_with_candidates=30,
-        searches_used=90,
+        institutions_considered=considered,
+        institutions_with_candidates=with_candidates,
+        searches_used=searches_used,
         status=DiscoveryRunStatus.COMPLETED,
+        institutions_available=available,
     )
-    report = render_report([], {}, [run], conn)
+
+
+def test_render_report_discovery_coverage_summary():
+    conn = get_connection(":memory:")
+    init_db(conn)
+    report = render_report([], {}, [_make_discovery_run()], conn)
     assert "## Discovery coverage" in report
     assert "42" in report
     assert "30" in report
     assert "12" in report  # NO_CANDIDATE_FOUND = considered - with_candidates
+    conn.close()
+
+
+# --- Whole-branch review I4: a capped run must not read as complete coverage --------------
+
+def test_coverage_table_flags_a_capped_run_as_partial():
+    conn = get_connection(":memory:")
+    init_db(conn)
+    # institution_cap=50 against a country with 240 listed institutions: 190 were never
+    # searched and never recorded as NO_CANDIDATE_FOUND, they are simply absent.
+    run = _make_discovery_run(considered=50, with_candidates=12, available=240)
+
+    report = render_report([], {}, [run], conn)
+
+    assert "50 / 240" in report
+    assert "partial" in report
+    assert "190 institution(s) not searched" in report
+    conn.close()
+
+
+def test_coverage_table_marks_an_uncapped_run_complete():
+    conn = get_connection(":memory:")
+    init_db(conn)
+    run = _make_discovery_run(considered=42, with_candidates=30, available=42)
+
+    report = render_report([], {}, [run], conn)
+
+    assert "42 / 42" in report
+    assert "complete" in report
+    assert "partial" not in report
     conn.close()

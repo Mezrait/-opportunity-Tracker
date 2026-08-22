@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from opportunity_tracker.db import get_connection, init_db
+from opportunity_tracker.discovery import websearch
 from opportunity_tracker.discovery.run import ingest_manual_pins, run_discovery
 from opportunity_tracker.models import DiscoveryRunStatus, Filter, Institution, InstitutionSource
 
@@ -158,6 +159,90 @@ def test_search_failure_for_one_institution_does_not_abort_run(mocker, conn):
     assert run.institutions_with_candidates == 1
 
 
+# --- Whole-branch review I4: a capped run must be visibly partial, not silently complete ---
+
+def test_run_records_total_available_institutions_before_the_cap(mocker, conn):
+    filter_obj = _insert_filter(conn, institution_cap=2)
+    institutions = [
+        _insert_institution(conn, f"uni{i}.edu.au", name=f"Uni {i}") for i in range(5)
+    ]
+    mocker.patch("opportunity_tracker.directory.list_institutions", return_value=institutions)
+    mocker.patch("opportunity_tracker.discovery.websearch.search_institution", return_value=[])
+
+    run = run_discovery(filter_obj, conn, api_key="sk-test")
+
+    assert run.institutions_considered == 2
+    assert run.institutions_available == 5  # the 3 past the cap are neither searched nor lost
+
+
+def test_uncapped_run_reports_available_equal_to_considered(mocker, conn):
+    filter_obj = _insert_filter(conn, institution_cap=50)
+    institutions = [
+        _insert_institution(conn, f"uni{i}.edu.au", name=f"Uni {i}") for i in range(3)
+    ]
+    mocker.patch("opportunity_tracker.directory.list_institutions", return_value=institutions)
+    mocker.patch("opportunity_tracker.discovery.websearch.search_institution", return_value=[])
+
+    run = run_discovery(filter_obj, conn, api_key="sk-test")
+
+    assert run.institutions_considered == run.institutions_available == 3
+
+
+# --- Whole-branch review I5: searches_used is the billed count, not one per institution ----
+
+def test_searches_used_reads_the_actual_billed_search_count(mocker, conn):
+    filter_obj = _insert_filter(conn)
+    institutions = [
+        _insert_institution(conn, f"uni{i}.edu.au", name=f"Uni {i}") for i in range(2)
+    ]
+    mocker.patch("opportunity_tracker.directory.list_institutions", return_value=institutions)
+
+    def _side_effect(institution, filter_obj_arg, api_key, max_uses=3):
+        results = websearch.SearchResults(
+            [{"url": f"https://{institution.domain}/rtp", "title": "RTP"}]
+        )
+        results.searches_used = 3  # search_institution is called with max_uses=3
+        return results
+
+    mocker.patch(
+        "opportunity_tracker.discovery.websearch.search_institution", side_effect=_side_effect
+    )
+
+    run = run_discovery(filter_obj, conn, api_key="sk-test")
+
+    assert run.institutions_considered == 2
+    assert run.searches_used == 6  # not 2 -- a flat +1 per institution undercounted by 3x
+
+
+def test_searches_used_falls_back_to_one_for_a_plain_list_result(mocker, conn):
+    filter_obj = _insert_filter(conn)
+    inst = _insert_institution(conn, "uwa.edu.au")
+    mocker.patch("opportunity_tracker.directory.list_institutions", return_value=[inst])
+    mocker.patch(
+        "opportunity_tracker.discovery.websearch.search_institution",
+        return_value=[{"url": "https://uwa.edu.au/rtp", "title": "RTP"}],
+    )
+
+    run = run_discovery(filter_obj, conn, api_key="sk-test")
+
+    assert run.searches_used == 1
+
+
+def test_searches_used_counts_a_failed_search_as_one(mocker, conn):
+    filter_obj = _insert_filter(conn)
+    inst = _insert_institution(conn, "bad.edu.au")
+    mocker.patch("opportunity_tracker.directory.list_institutions", return_value=[inst])
+    mocker.patch(
+        "opportunity_tracker.discovery.websearch.search_institution",
+        side_effect=RuntimeError("network exploded"),
+    )
+
+    run = run_discovery(filter_obj, conn, api_key="sk-test")
+
+    assert run.searches_used == 1
+    assert run.status == DiscoveryRunStatus.COMPLETED
+
+
 def test_ingest_manual_pins_creates_candidate_with_null_discovery_run(tmp_path, conn):
     seeds_path = tmp_path / "seeds.yaml"
     seeds_path.write_text(
@@ -188,3 +273,105 @@ def test_ingest_manual_pins_creates_candidate_with_null_discovery_run(tmp_path, 
         "SELECT source FROM institution WHERE domain = ?", ("pinned.edu.au",)
     ).fetchone()
     assert institution_row["source"] == InstitutionSource.MANUAL.value
+
+
+# --- Whole-branch review I6: pins must not be re-ingested on every run --------------------
+
+def _write_seeds(tmp_path, seeds):
+    seeds_path = tmp_path / "seeds.yaml"
+    seeds_path.write_text(yaml.safe_dump(seeds), encoding="utf-8")
+    return str(seeds_path)
+
+
+def test_ingesting_the_same_pins_twice_does_not_duplicate_candidates(tmp_path, conn):
+    """ingest_manual_pins runs unconditionally on every `optrack run`. Without dedup, each
+    run inserted a fresh candidate per pin, and each of those triggered a full re-fetch,
+    re-extraction, and a duplicate set of requirement rows for an unchanged page."""
+    seeds_path = _write_seeds(
+        tmp_path,
+        [{"institution_domain": "pinned.edu.au", "url": "https://pinned.edu.au/manual"}],
+    )
+
+    first = ingest_manual_pins(seeds_path, conn)
+    second = ingest_manual_pins(seeds_path, conn)
+
+    assert len(first) == 1
+    assert second == []
+    total = conn.execute("SELECT COUNT(*) AS n FROM candidate").fetchone()["n"]
+    assert total == 1
+
+
+def test_pin_is_skipped_when_discovery_already_found_the_same_url(tmp_path, conn):
+    inst = _insert_institution(conn, "pinned.edu.au")
+    conn.execute(
+        "INSERT INTO candidate (discovery_run_id, institution_id, url, query_used, "
+        "found_at, promoted_to_award_id) VALUES (NULL, ?, ?, 'q', ?, NULL)",
+        (inst.id, "https://pinned.edu.au/manual", "2026-08-22T00:00:00+00:00"),
+    )
+    conn.commit()
+    seeds_path = _write_seeds(
+        tmp_path,
+        [{"institution_domain": "pinned.edu.au", "url": "https://pinned.edu.au/manual"}],
+    )
+
+    assert ingest_manual_pins(seeds_path, conn) == []
+    assert conn.execute("SELECT COUNT(*) AS n FROM candidate").fetchone()["n"] == 1
+
+
+def test_a_new_pin_is_still_ingested_alongside_an_already_known_one(tmp_path, conn):
+    seeds_path = _write_seeds(
+        tmp_path,
+        [{"institution_domain": "pinned.edu.au", "url": "https://pinned.edu.au/manual"}],
+    )
+    ingest_manual_pins(seeds_path, conn)
+
+    seeds_path = _write_seeds(
+        tmp_path,
+        [
+            {"institution_domain": "pinned.edu.au", "url": "https://pinned.edu.au/manual"},
+            {"institution_domain": "pinned.edu.au", "url": "https://pinned.edu.au/second"},
+        ],
+    )
+    new_ids = ingest_manual_pins(seeds_path, conn)
+
+    assert len(new_ids) == 1
+    urls = {r["url"] for r in conn.execute("SELECT url FROM candidate")}
+    assert urls == {"https://pinned.edu.au/manual", "https://pinned.edu.au/second"}
+
+
+# --- Whole-branch review I9: seeds.yaml can declare a source tier -------------------------
+
+def test_pin_declared_tier_is_stored_on_the_candidate_row(tmp_path, conn):
+    # Spec §5/§9.1's mandatory regression case: cybersure-master.eu matches no academic
+    # suffix and is in no institution directory, so only a seed override makes it Tier 1.
+    seeds_path = _write_seeds(
+        tmp_path,
+        [
+            {
+                "institution_domain": "cybersure-master.eu",
+                "url": "https://www.cybersure-master.eu/admission",
+                "declared_tier": 1,
+            }
+        ],
+    )
+
+    new_ids = ingest_manual_pins(seeds_path, conn)
+
+    row = conn.execute(
+        "SELECT declared_tier FROM candidate WHERE id = ?", (new_ids[0],)
+    ).fetchone()
+    assert row["declared_tier"] == 1
+
+
+def test_pin_without_declared_tier_stores_null(tmp_path, conn):
+    seeds_path = _write_seeds(
+        tmp_path,
+        [{"institution_domain": "pinned.edu.au", "url": "https://pinned.edu.au/manual"}],
+    )
+
+    new_ids = ingest_manual_pins(seeds_path, conn)
+
+    row = conn.execute(
+        "SELECT declared_tier FROM candidate WHERE id = ?", (new_ids[0],)
+    ).fetchone()
+    assert row["declared_tier"] is None

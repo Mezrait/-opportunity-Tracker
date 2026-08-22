@@ -25,6 +25,43 @@ def test_init_db_is_idempotent():
     init_db(conn)  # must not raise
 
 
+def _columns(conn, table):
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def test_init_db_creates_the_coverage_and_declared_tier_columns():
+    conn = get_connection(":memory:")
+    init_db(conn)
+    assert "institutions_available" in _columns(conn, "discovery_run")
+    assert "declared_tier" in _columns(conn, "candidate")
+
+
+def test_init_db_adds_new_columns_to_a_database_created_by_an_earlier_build():
+    """CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so a database file
+    from an earlier build would otherwise fail on the first query naming a new column."""
+    conn = get_connection(":memory:")
+    conn.execute(
+        "CREATE TABLE discovery_run (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "filter_id INTEGER NOT NULL, filter_content_hash TEXT NOT NULL, "
+        "started_at TEXT NOT NULL, completed_at TEXT, "
+        "institutions_considered INTEGER NOT NULL DEFAULT 0, "
+        "institutions_with_candidates INTEGER NOT NULL DEFAULT 0, "
+        "searches_used INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE candidate (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "discovery_run_id INTEGER, institution_id INTEGER NOT NULL, url TEXT NOT NULL, "
+        "query_used TEXT NOT NULL, found_at TEXT NOT NULL, promoted_to_award_id INTEGER)"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    assert "institutions_available" in _columns(conn, "discovery_run")
+    assert "declared_tier" in _columns(conn, "candidate")
+    init_db(conn)  # still idempotent afterwards
+
+
 def test_requirement_roundtrip_and_kind_constraint():
     conn = get_connection(":memory:")
     init_db(conn)

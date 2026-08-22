@@ -138,17 +138,26 @@ def fetch_pending_command() -> None:
     `ON CONFLICT ... DO NOTHING` and then looks the award up by canonical_url, whether it was
     just inserted or already existed -- a duplicate candidate re-links to the existing award
     instead of raising `sqlite3.IntegrityError` and aborting the loop mid-batch.
+
+    `candidate.declared_tier` (set from seeds.yaml for manual pins) is passed through to
+    the fetcher, which is what makes the spec §5 seed tier-override path actually reachable
+    at runtime -- `cybersure-master.eu` matches no academic suffix and is in no institution
+    directory, so without the override it would be Tier 3 and, per principle 2, unable to
+    write a single field.
     """
     conn = _open_db()
     pending = conn.execute(
         "SELECT candidate.id AS candidate_id, candidate.url AS url, "
+        "candidate.declared_tier AS declared_tier, "
         "institution.name AS institution, institution.country AS country "
         "FROM candidate JOIN institution ON candidate.institution_id = institution.id "
         "WHERE candidate.promoted_to_award_id IS NULL"
     ).fetchall()
     promoted = 0
     for row in pending:
-        document = fetcher_pipeline.fetch(row["url"], conn)
+        document = fetcher_pipeline.fetch(
+            row["url"], conn, declared_tier=row["declared_tier"]
+        )
         conn.execute(
             "INSERT INTO award (scheme_id, institution, country, degree_levels, "
             "intake_year, canonical_url) VALUES (NULL, ?, ?, '[]', NULL, ?) "
@@ -331,11 +340,12 @@ def report_command(
                 institutions_with_candidates=r["institutions_with_candidates"],
                 searches_used=r["searches_used"],
                 status=DiscoveryRunStatus(r["status"]),
+                institutions_available=r["institutions_available"],
             )
             for r in conn.execute(
                 "SELECT id, filter_id, filter_content_hash, started_at, completed_at, "
-                "institutions_considered, institutions_with_candidates, searches_used, "
-                "status FROM discovery_run"
+                "institutions_considered, institutions_available, "
+                "institutions_with_candidates, searches_used, status FROM discovery_run"
             )
         ]
         rendered = markdown.render_report(evaluations, awards_by_id, discovery_runs, conn)
