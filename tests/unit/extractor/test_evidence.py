@@ -83,8 +83,14 @@ def test_large_document_rejections_are_fast_and_still_correct():
     elapsed = time.perf_counter() - start
 
     # Before this fix, each of these two rejections took ~3 minutes on a document this
-    # size (a fresh SequenceMatcher per character offset, three window sizes).
-    assert elapsed < 1.0, f"two rejections took {elapsed:.2f}s on a ~50KB document"
+    # size (a fresh SequenceMatcher per character offset, three window sizes). The fixed
+    # implementation measures ~0.1-0.2s for both in isolation, but this threshold is
+    # generous (15s, ~100x that) rather than tight, because wall-clock assertions are
+    # sensitive to system load when run as part of the full suite (241 other tests,
+    # some spinning up Playwright/SQLite) rather than in isolation. The regression this
+    # guards against is orders of magnitude (minutes, not seconds), so a loose threshold
+    # still catches it cleanly without being flaky under normal CI/full-suite variance.
+    assert elapsed < 15.0, f"two rejections took {elapsed:.2f}s on a ~50KB document"
 
 
 def test_large_document_still_accepts_an_exact_span():
