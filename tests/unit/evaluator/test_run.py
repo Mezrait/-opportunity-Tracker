@@ -138,6 +138,93 @@ def test_evaluate_award_resolution_prefers_human_verified_over_other_rows():
     assert evaluation.per_requirement_outcomes["research_project_fraction"] == "pass"
 
 
+def test_evaluate_award_resolution_prefers_higher_priority_tier_over_more_recent_extraction():
+    # Spec §4.4 resolution order step 2: with no human_verified rows for the kind, the row
+    # from the highest-priority (lowest source_tier number) document wins -- even when a
+    # lower-priority document's row was extracted more recently. The existing
+    # human_verified test above uses a single document (same tier) for both candidate rows,
+    # so it gives zero coverage of the min(source_tier) / tier-narrowing branch; this test
+    # closes that gap.
+    conn = _make_conn()
+    profile = _insert_profile(conn, attributes={"research_project_fraction_held": 0.30})
+    award_id = _insert_award(conn)
+    tier1_document_id = _insert_document(
+        conn, "https://uwa.edu.au/official-rules", source_tier=1
+    )
+    tier2_document_id = _insert_document(
+        conn, "https://example.com/scholarship-blog", source_tier=2
+    )
+
+    _insert_requirement(
+        conn,
+        award_id,
+        tier1_document_id,
+        "research_project_fraction",
+        ">=",
+        "0.25",  # correct value from the authoritative tier-1 source
+        "fraction",
+        human_verified=0,
+        extracted_at="2026-01-01T00:00:00+00:00",  # older than the tier-2 row below
+    )
+    _insert_requirement(
+        conn,
+        award_id,
+        tier2_document_id,
+        "research_project_fraction",
+        ">=",
+        "0.50",  # stale/wrong value from a lower-priority source, extracted later
+        "fraction",
+        human_verified=0,
+        extracted_at="2026-06-01T00:00:00+00:00",  # newer than the tier-1 row above
+    )
+
+    evaluation = evaluate_award(award_id, profile, conn, gold_set_recall={})
+
+    # held (0.30) >= 0.25 -> pass. If resolution ignored tier and picked the
+    # more-recently-extracted tier-2 row instead, this would be "fail" (0.30 >= 0.50 is
+    # false).
+    assert evaluation.per_requirement_outcomes["research_project_fraction"] == "pass"
+
+
+def test_evaluate_award_resolution_prefers_latest_extracted_at_within_best_tier():
+    # Spec §4.4 resolution order step 3: among rows tied on the best (lowest-number) source
+    # tier, with none human_verified, the latest by extracted_at wins.
+    conn = _make_conn()
+    profile = _insert_profile(conn, attributes={"research_project_fraction_held": 0.30})
+    award_id = _insert_award(conn)
+    document_id_a = _insert_document(conn, "https://uwa.edu.au/rules-v1", source_tier=1)
+    document_id_b = _insert_document(conn, "https://uwa.edu.au/rules-v2", source_tier=1)
+
+    _insert_requirement(
+        conn,
+        award_id,
+        document_id_a,
+        "research_project_fraction",
+        ">=",
+        "0.50",  # older, superseded value
+        "fraction",
+        human_verified=0,
+        extracted_at="2026-01-01T00:00:00+00:00",
+    )
+    _insert_requirement(
+        conn,
+        award_id,
+        document_id_b,
+        "research_project_fraction",
+        ">=",
+        "0.25",  # newer extraction, same (best) tier
+        "fraction",
+        human_verified=0,
+        extracted_at="2026-06-01T00:00:00+00:00",
+    )
+
+    evaluation = evaluate_award(award_id, profile, conn, gold_set_recall={})
+
+    # held (0.30) >= 0.25 -> pass. If resolution had picked the earlier same-tier row
+    # instead, this would be "fail" (0.30 >= 0.50 is false).
+    assert evaluation.per_requirement_outcomes["research_project_fraction"] == "pass"
+
+
 def test_evaluate_award_persists_evaluation_row_with_json_fields():
     conn = _make_conn()
     profile = _insert_profile(conn)
