@@ -1,6 +1,9 @@
 """Tests for robots.txt compliance and per-host rate limiting. urllib.request.urlopen
 and time.monotonic/time.sleep are mocked throughout -- this suite never fetches a real
 robots.txt over the network and never actually sleeps for 2 real seconds."""
+import socket
+import ssl
+import urllib.error
 from unittest.mock import MagicMock
 
 import pytest
@@ -47,6 +50,59 @@ def test_is_allowed_caches_parsed_robots_txt_per_host(mocker):
     robots.is_allowed("https://example.edu/b")
 
     assert mock_urlopen.call_count == 1  # second check for the same host is cached
+
+
+# --- Whole-branch review C3: is_allowed must never raise, and must never hang ---------------
+
+def test_is_allowed_does_not_propagate_url_error(mocker):
+    """RobotFileParser.read() only catches HTTPError internally -- a URLError (DNS
+    failure, connection refused, TLS error) used to propagate straight out of is_allowed
+    and abort the whole run on one dead domain among 50 discovered institutions."""
+    mocker.patch(
+        "opportunity_tracker.fetcher.robots.urllib.request.urlopen",
+        side_effect=urllib.error.URLError("getaddrinfo failed"),
+    )
+
+    assert robots.is_allowed("https://dead-domain.example/page") is True  # fail-open
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        urllib.error.URLError("connection refused"),
+        socket.timeout("timed out"),
+        ssl.SSLError("certificate verify failed"),
+        OSError("network unreachable"),
+    ],
+)
+def test_is_allowed_survives_every_urlopen_failure_mode(mocker, exc):
+    mocker.patch(
+        "opportunity_tracker.fetcher.robots.urllib.request.urlopen", side_effect=exc
+    )
+
+    assert robots.is_allowed("https://broken.example/page") is True
+
+
+def test_is_allowed_passes_an_explicit_timeout_to_urlopen(mocker):
+    """No timeout at all means a black-holed host hangs `optrack run` indefinitely."""
+    mock_urlopen = _mock_urlopen(mocker, b"User-agent: *\nDisallow: /private/\n")
+
+    robots.is_allowed("https://example.edu/public/page")
+
+    _, kwargs = mock_urlopen.call_args
+    assert kwargs["timeout"] == robots.ROBOTS_TIMEOUT_SECONDS
+
+
+def test_failed_robots_fetch_is_cached_so_a_dead_host_costs_one_timeout(mocker):
+    mock_urlopen = mocker.patch(
+        "opportunity_tracker.fetcher.robots.urllib.request.urlopen",
+        side_effect=urllib.error.URLError("getaddrinfo failed"),
+    )
+
+    robots.is_allowed("https://dead-domain.example/a")
+    robots.is_allowed("https://dead-domain.example/b")
+
+    assert mock_urlopen.call_count == 1
 
 
 def test_wait_for_host_blocks_until_min_interval_elapsed(mocker):
