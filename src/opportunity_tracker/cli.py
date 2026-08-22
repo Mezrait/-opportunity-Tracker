@@ -129,7 +129,16 @@ def discover_command(
 
 @app.command("fetch-pending")
 def fetch_pending_command() -> None:
-    """Fetch every candidate without a promoted award, promoting each to an award+document pair."""
+    """Fetch every candidate without a promoted award, promoting each to an award+document pair.
+
+    `award.canonical_url` is UNIQUE, and candidates are NOT deduplicated against existing
+    awards before this runs (manual pins are never deduplicated against discovery results,
+    per discovery/run.py, and a fresh discovery pass can re-surface an un-promoted candidate
+    for a URL that was already promoted in a prior run). So the insert below uses
+    `ON CONFLICT ... DO NOTHING` and then looks the award up by canonical_url, whether it was
+    just inserted or already existed -- a duplicate candidate re-links to the existing award
+    instead of raising `sqlite3.IntegrityError` and aborting the loop mid-batch.
+    """
     conn = _open_db()
     pending = conn.execute(
         "SELECT candidate.id AS candidate_id, candidate.url AS url, "
@@ -140,12 +149,16 @@ def fetch_pending_command() -> None:
     promoted = 0
     for row in pending:
         document = fetcher_pipeline.fetch(row["url"], conn)
-        cursor = conn.execute(
+        conn.execute(
             "INSERT INTO award (scheme_id, institution, country, degree_levels, "
-            "intake_year, canonical_url) VALUES (NULL, ?, ?, '[]', NULL, ?)",
+            "intake_year, canonical_url) VALUES (NULL, ?, ?, '[]', NULL, ?) "
+            "ON CONFLICT(canonical_url) DO NOTHING",
             (row["institution"], row["country"], row["url"]),
         )
-        award_id = cursor.lastrowid
+        award_row = conn.execute(
+            "SELECT id FROM award WHERE canonical_url = ?", (row["url"],)
+        ).fetchone()
+        award_id = award_row["id"]
         conn.execute(
             "UPDATE candidate SET promoted_to_award_id = ? WHERE id = ?",
             (award_id, row["candidate_id"]),
@@ -159,18 +172,44 @@ def fetch_pending_command() -> None:
 
 @app.command("extract-pending")
 def extract_pending_command() -> None:
-    """Run extraction for every award whose latest fetched document has no requirements yet."""
+    """Run extraction for every award whose latest successfully-fetched document has no
+    requirements yet.
+
+    fetcher.pipeline.fetch never raises on a failed fetch -- it records the failure as a
+    `document` row with `text_path=NULL` and `fetch_status='error:...'` (spec §8: never
+    silently skipped, never raises). The pending-documents query below only considers
+    documents with `text_path IS NOT NULL` as candidates for "latest", so a degraded/failed
+    fetch is never handed to extract_requirements (which does `open(document.text_path)` and
+    would crash with a TypeError on None). Awards whose *only* document(s) failed to fetch
+    are reported separately below as skipped, so they stay visible instead of silently
+    disappearing from the run.
+    """
     api_key = config.get_anthropic_api_key()
     conn = _open_db()
     pending = conn.execute(
         "SELECT award.id AS award_id, latest.document_id AS document_id "
         "FROM award "
-        "JOIN (SELECT url, MAX(id) AS document_id FROM document GROUP BY url) AS latest "
+        "JOIN (SELECT url, MAX(id) AS document_id FROM document "
+        "      WHERE text_path IS NOT NULL GROUP BY url) AS latest "
         "  ON latest.url = award.canonical_url "
         "WHERE NOT EXISTS ("
         "  SELECT 1 FROM requirement WHERE requirement.document_id = latest.document_id"
         ")"
     ).fetchall()
+    skipped = conn.execute(
+        "SELECT award.id AS award_id FROM award "
+        "WHERE EXISTS (SELECT 1 FROM document WHERE document.url = award.canonical_url) "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM document WHERE document.url = award.canonical_url "
+        "  AND document.text_path IS NOT NULL"
+        ") "
+        "AND NOT EXISTS (SELECT 1 FROM requirement WHERE requirement.award_id = award.id)"
+    ).fetchall()
+    for row in skipped:
+        typer.echo(
+            f"Award {row['award_id']}: extraction skipped, fetch failed "
+            "(no successfully fetched document)."
+        )
     for row in pending:
         doc_row = conn.execute(
             "SELECT id, url, source_tier, fetch_method, content_hash, text_path, "
@@ -198,7 +237,10 @@ def extract_pending_command() -> None:
             )
         else:
             typer.echo(f"Award {row['award_id']}: extracted {len(requirements)} requirement(s).")
-    typer.echo(f"Extraction complete: {len(pending)} award(s) processed.")
+    typer.echo(
+        f"Extraction complete: {len(pending)} award(s) processed, "
+        f"{len(skipped)} skipped (fetch failed)."
+    )
     conn.close()
 
 
@@ -233,9 +275,15 @@ def report_command(
         raise typer.Exit(code=1)
 
     conn = _open_db()
+    # `evaluation` is an append-only log (spec §4.5) -- evaluate_award never updates or
+    # deletes a prior row, it always inserts a new one. Re-running `evaluate-all` therefore
+    # leaves every earlier evaluation in place, so this query keeps only the highest-id
+    # (i.e. most recent) row per award_id; without this a re-run would make every award
+    # appear once per evaluation ever recorded, possibly in different buckets.
     evaluation_rows = conn.execute(
         "SELECT id, award_id, profile_version, evaluated_at, bucket, sort_keys, "
-        "per_requirement_outcomes FROM evaluation"
+        "per_requirement_outcomes FROM evaluation "
+        "WHERE id IN (SELECT MAX(id) FROM evaluation GROUP BY award_id)"
     ).fetchall()
 
     if not evaluation_rows:
