@@ -51,13 +51,22 @@ def fetch(url: str, conn: sqlite3.Connection, declared_tier: int | None = None) 
     robots.wait_for_host(domain)
 
     if url.lower().endswith(".pdf"):
-        text = _fetch_pdf_text(url)
+        try:
+            text = _fetch_pdf_text(url)
+        except Exception as exc:  # noqa: BLE001 - any fetch failure degrades to a recorded row, never a crash
+            return _fetch_failed_document(conn, url, source_tier, FetchMethod.PDF, exc)
         fetch_method = FetchMethod.PDF
         is_degraded = False
     else:
-        http_result = http_fetch.fetch_http(url)
+        try:
+            http_result = http_fetch.fetch_http(url)
+        except Exception as exc:  # noqa: BLE001
+            return _fetch_failed_document(conn, url, source_tier, FetchMethod.HTTP, exc)
         if http_result.is_degraded:
-            headless_result = headless_fetch.fetch_headless(url)
+            try:
+                headless_result = headless_fetch.fetch_headless(url)
+            except Exception as exc:  # noqa: BLE001
+                return _fetch_failed_document(conn, url, source_tier, FetchMethod.HEADLESS, exc)
             text = headless_result.text
             fetch_method = FetchMethod.HEADLESS
             is_degraded = headless_result.is_degraded
@@ -78,6 +87,28 @@ def fetch(url: str, conn: sqlite3.Connection, declared_tier: int | None = None) 
         text_path=text_path,
         fetch_status="ok",
         degraded=is_degraded,
+    )
+
+
+def _fetch_failed_document(
+    conn: sqlite3.Connection,
+    url: str,
+    source_tier: SourceTier,
+    fetch_method: FetchMethod,
+    exc: Exception,
+) -> Document:
+    """Record a fetch that raised (network error, timeout, PDF parse failure, ...) as a
+    `document` row instead of letting the exception propagate and crash the pipeline.
+    Mirrors the robots-disallowed case: never raise, always insert a row (spec §8)."""
+    return _insert_document(
+        conn,
+        url=url,
+        source_tier=source_tier,
+        fetch_method=fetch_method,
+        content_hash="",
+        text_path=None,
+        fetch_status=f"error:fetch_failed:{type(exc).__name__}",
+        degraded=False,
     )
 
 

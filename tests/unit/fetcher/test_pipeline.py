@@ -109,6 +109,94 @@ def test_fetch_robots_disallowed_still_inserts_document_row(mocker, conn, tmp_pa
     assert row["fetch_status"] == "error:robots_disallowed"
 
 
+def test_fetch_http_exception_still_inserts_document_row(mocker, conn, tmp_path):
+    mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
+    mocker.patch(
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        return_value=SourceTier.TIER_1,
+    )
+    mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)
+    mocker.patch("opportunity_tracker.fetcher.pipeline.robots.wait_for_host")
+    mocker.patch(
+        "opportunity_tracker.fetcher.pipeline.http_fetch.fetch_http",
+        side_effect=TimeoutError("connection timed out"),
+    )
+    mock_headless = mocker.patch("opportunity_tracker.fetcher.pipeline.headless_fetch.fetch_headless")
+
+    document = pipeline.fetch("https://uwa.edu.au/flaky-page", conn)
+
+    assert document.fetch_status == "error:fetch_failed:TimeoutError"
+    assert document.fetch_method == FetchMethod.HTTP
+    assert document.content_hash == ""
+    assert document.degraded is False
+    assert document.text_path is None
+    mock_headless.assert_not_called()
+
+    row = conn.execute("SELECT * FROM document WHERE id = ?", (document.id,)).fetchone()
+    assert row is not None  # never a silent skip, never an uncaught crash
+    assert row["fetch_status"] == "error:fetch_failed:TimeoutError"
+
+
+def test_fetch_headless_exception_still_inserts_document_row(mocker, conn, tmp_path):
+    mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
+    mocker.patch(
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        return_value=SourceTier.TIER_1,
+    )
+    mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)
+    mocker.patch("opportunity_tracker.fetcher.pipeline.robots.wait_for_host")
+    mocker.patch(
+        "opportunity_tracker.fetcher.pipeline.http_fetch.fetch_http",
+        return_value=FetchResult(text="Loading component...", status_code=200, is_degraded=True),
+    )
+    mocker.patch(
+        "opportunity_tracker.fetcher.pipeline.headless_fetch.fetch_headless",
+        side_effect=RuntimeError("browser crashed"),
+    )
+
+    document = pipeline.fetch("https://uwa.edu.au/hdr", conn)
+
+    assert document.fetch_status == "error:fetch_failed:RuntimeError"
+    assert document.fetch_method == FetchMethod.HEADLESS
+    assert document.content_hash == ""
+    assert document.degraded is False
+    assert document.text_path is None
+
+    row = conn.execute("SELECT * FROM document WHERE id = ?", (document.id,)).fetchone()
+    assert row is not None
+    assert row["fetch_status"] == "error:fetch_failed:RuntimeError"
+
+
+def test_fetch_pdf_extraction_exception_still_inserts_document_row(mocker, conn, tmp_path):
+    mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
+    mocker.patch(
+        "opportunity_tracker.fetcher.pipeline.tiering.classify_tier",
+        return_value=SourceTier.TIER_1,
+    )
+    mocker.patch("opportunity_tracker.fetcher.pipeline.robots.is_allowed", return_value=True)
+    mocker.patch("opportunity_tracker.fetcher.pipeline.robots.wait_for_host")
+
+    fake_response = mocker.Mock()
+    fake_response.content = b"%PDF-1.4 fake bytes for a mocked download"
+    mocker.patch("opportunity_tracker.fetcher.pipeline.httpx.get", return_value=fake_response)
+    mocker.patch(
+        "opportunity_tracker.fetcher.pipeline.pdf_fetch.extract_pdf_text",
+        side_effect=ValueError("could not parse PDF"),
+    )
+
+    document = pipeline.fetch("https://uwa.edu.au/scholarships/conditions.PDF", conn)
+
+    assert document.fetch_status == "error:fetch_failed:ValueError"
+    assert document.fetch_method == FetchMethod.PDF
+    assert document.content_hash == ""
+    assert document.degraded is False
+    assert document.text_path is None
+
+    row = conn.execute("SELECT * FROM document WHERE id = ?", (document.id,)).fetchone()
+    assert row is not None
+    assert row["fetch_status"] == "error:fetch_failed:ValueError"
+
+
 def test_fetch_pdf_url_extracts_text_via_pdf_fetch(mocker, conn, tmp_path):
     mocker.patch.object(pipeline, "DOCUMENTS_DIR", tmp_path)
     mocker.patch(
