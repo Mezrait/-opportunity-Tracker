@@ -61,6 +61,7 @@ class Bucket(str, Enum):
     ELIGIBLE_LATER = "ELIGIBLE_LATER"
     UNKNOWN_GATED = "UNKNOWN_GATED"
     LIKELY_BLOCKED = "LIKELY_BLOCKED"
+    COVERAGE_GAP = "COVERAGE_GAP"
 
 
 class Outcome(str, Enum):
