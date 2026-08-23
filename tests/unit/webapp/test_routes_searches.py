@@ -135,6 +135,51 @@ def test_post_new_full_payload_creates_filter_and_yaml(client, wired, tmp_path):
     assert on_disk["institution_cap"] == 30
 
 
+def test_post_new_colliding_slugs_do_not_overwrite_each_other(client, wired, tmp_path):
+    """Regression test for the slug-collision bug: `_slugify` strips punctuation,
+    so two different search names -- "Canada CS!!!" and "Canada CS???" -- both
+    reduce to the slug "canada-cs". Both searches must still get their own
+    correct, distinct filter row (already true before the fix) AND their own
+    distinct on-disk YAML file (the actual bug: both used to be written to the
+    same `web_filters/canada-cs.yaml`, so the second save silently overwrote
+    the first's file). Assert both files exist, are different paths, and each
+    file's content matches only its own search -- neither was clobbered."""
+    data_a = dict(FULL_POST_DATA)
+    data_a["name"] = "Canada CS!!!"
+    data_a["country"] = "Canada"
+
+    data_b = dict(FULL_POST_DATA)
+    data_b["name"] = "Canada CS???"
+    data_b["country"] = "United States"
+
+    resp_a = client.post("/searches/new", data=data_a, follow_redirects=False)
+    assert resp_a.status_code == 303
+    resp_b = client.post("/searches/new", data=data_b, follow_redirects=False)
+    assert resp_b.status_code == 303
+
+    rows = wired.execute("SELECT id, name, country FROM filter ORDER BY id").fetchall()
+    assert len(rows) == 2, "each search must still get its own distinct filter row"
+    assert {row["name"] for row in rows} == {"Canada CS!!!", "Canada CS???"}
+    assert {row["country"] for row in rows} == {"Canada", "United States"}
+
+    web_filters_dir = tmp_path / "web_filters"
+    yaml_files = sorted(web_filters_dir.glob("*.yaml"))
+    assert len(yaml_files) == 2, (
+        "two colliding-slug searches must produce two distinct on-disk YAML "
+        f"files, not one overwriting the other; found: {[p.name for p in yaml_files]}"
+    )
+    assert yaml_files[0] != yaml_files[1]
+
+    contents_by_name = {}
+    for path in yaml_files:
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+        contents_by_name[parsed["name"]] = parsed
+
+    assert set(contents_by_name) == {"Canada CS!!!", "Canada CS???"}
+    assert contents_by_name["Canada CS!!!"]["country"] == "Canada"
+    assert contents_by_name["Canada CS???"]["country"] == "United States"
+
+
 def test_get_searches_after_post_shows_name_and_country(client, wired):
     """Case 3: GET /searches after Step 2's POST -> 200, response body contains
     the search's name and country."""

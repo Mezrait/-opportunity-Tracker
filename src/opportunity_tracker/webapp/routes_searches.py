@@ -9,6 +9,16 @@ content_hash), while any real change creates a NEW filter row rather than
 mutating the old one (already-tested behavior in filters.py, not this route's
 job to reimplement).
 
+`_slugify` alone is not collision-free: two different names can strip down to
+the same slug (e.g. "Canada CS!!!" and "Canada CS???" both -> "canada-cs").
+`_write_and_sync` guards against that: it only writes straight to
+`<slug>.yaml` when that path is unclaimed or already belongs to a search with
+this same `name` (the ordinary create/edit-overwrite case). If the path is
+claimed by a search with a DIFFERENT name, it writes to a temp file, syncs it
+to learn the real `filter_id` (only known after `sync_filter` runs), and moves
+it to an id-qualified `<slug>-<filter_id>.yaml` so the two searches never
+share a file.
+
 `_WEB_FILTERS_DIR` is a relative path resolved against the process CWD, same
 convention as `config.PROFILE_PATH` / `config.SEEDS_PATH`.
 """
@@ -35,6 +45,21 @@ _WEB_FILTERS_DIR = Path("web_filters")
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
     return slug or "search"
+
+
+def _existing_yaml_name(path: Path) -> str | None:
+    """Return the `name` field stored in an existing on-disk saved-search YAML,
+    or None if the file doesn't exist or can't be read as expected. Used to
+    tell "this path already belongs to this same search" (safe to overwrite)
+    apart from "this path is claimed by a DIFFERENT search that happens to
+    slugify the same" (a collision -- must not overwrite)."""
+    if not path.exists():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return data.get("name")
+    except Exception:
+        return None
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -77,7 +102,7 @@ def _write_and_sync(
 ) -> None:
     _WEB_FILTERS_DIR.mkdir(parents=True, exist_ok=True)
     slug = _slugify(name)
-    path = _WEB_FILTERS_DIR / f"{slug}.yaml"
+    slug_path = _WEB_FILTERS_DIR / f"{slug}.yaml"
 
     fields_list = [f.strip() for f in fields_raw.split(",") if f.strip()]
 
@@ -92,10 +117,24 @@ def _write_and_sync(
         "institution_cap": institution_cap,
     }
 
-    with open(path, "w", encoding="utf-8") as f:
+    existing_name = _existing_yaml_name(slug_path)
+    if existing_name is not None and existing_name != name:
+        # Slug collision with a DIFFERENT search -- writing to slug_path would
+        # silently clobber that other search's on-disk YAML. Write to a temp
+        # file first (the id needed to disambiguate only exists once
+        # sync_filter has run), then move it to an id-qualified final path.
+        tmp_path = _WEB_FILTERS_DIR / f"{slug}.pending.yaml"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f)
+        result = filters.sync_filter(str(tmp_path), conn)
+        final_path = _WEB_FILTERS_DIR / f"{slug}-{result.id}.yaml"
+        tmp_path.replace(final_path)
+        return
+
+    with open(slug_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f)
 
-    filters.sync_filter(str(path), conn)
+    filters.sync_filter(str(slug_path), conn)
 
 
 @router.get("/searches")
