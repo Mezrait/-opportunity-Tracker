@@ -1,5 +1,10 @@
 """Extractor run: one document -> requirement rows via a single (or, on unparseable
-output, retried-once) Anthropic tool-use call. See spec section 6.2, section 8.
+output, retried-once) forced tool call. See spec section 6.2, section 8.
+
+Originally built against a direct Anthropic tool-use call; migrated 2026-08-23 to route
+through llm_extract.call_tool_forced (Groq underneath) for cost -- see the web-UI design
+spec's decision log. The retry policy, evidence validation, and Principle 2 enforcement
+below are unchanged.
 
 The extractor never sees the operator's profile (that separation lives in
 prompts.py) and every candidate requirement's evidence is mechanically validated
@@ -14,16 +19,14 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
-import anthropic
-
+from opportunity_tracker import llm_extract
 from opportunity_tracker.extractor import evidence
 from opportunity_tracker.extractor.prompts import build_extraction_prompt
 from opportunity_tracker.extractor.schema import REQUIREMENT_JSON_SCHEMA
 from opportunity_tracker.models import Document, Requirement, RequirementKind, SourceTier
 
-_MODEL = "claude-opus-5"
-_MAX_TOKENS = 4096
 _TOOL_NAME = "record_requirements"
+_TOOL_DESCRIPTION = "Record every requirement extracted from the document."
 
 # Principle 2 (spec §61-62): "Only Tier 1 sources write to fields. A field with no Tier 1
 # source remains NULL. Never averaged, never inferred, never filled from a lower-tier
@@ -41,56 +44,41 @@ _RETRY_INSTRUCTION = (
 )
 
 
-def _call_model(client: "anthropic.Anthropic", prompt: str) -> list | None:
+def _call_model(prompt: str, api_key: str) -> list | None:
     """Call the model once, forcing the record_requirements tool.
 
     Returns the parsed `requirements` list, or None if the response could not
-    be parsed as a well-formed tool call (no matching tool_use block, or its
-    `input` is not a dict with a `requirements` list).
+    be parsed as a well-formed tool call (no matching tool call, or its
+    arguments are not a dict with a `requirements` list).
     """
-    response = client.messages.create(
-        model=_MODEL,
-        max_tokens=_MAX_TOKENS,
-        messages=[{"role": "user", "content": prompt}],
-        tools=[
-            {
-                "name": _TOOL_NAME,
-                "description": "Record every requirement extracted from the document.",
-                "input_schema": REQUIREMENT_JSON_SCHEMA,
-            }
-        ],
-        tool_choice={"type": "tool", "name": _TOOL_NAME},
+    result = llm_extract.call_tool_forced(
+        prompt=prompt,
+        tool_name=_TOOL_NAME,
+        tool_description=_TOOL_DESCRIPTION,
+        input_schema=REQUIREMENT_JSON_SCHEMA,
+        api_key=api_key,
     )
-
-    for block in getattr(response, "content", []):
-        if getattr(block, "type", None) != "tool_use":
-            continue
-        if getattr(block, "name", None) != _TOOL_NAME:
-            continue
-        tool_input = getattr(block, "input", None)
-        if not isinstance(tool_input, dict):
-            continue
-        requirements = tool_input.get("requirements")
-        if not isinstance(requirements, list):
-            continue
-        return requirements
-
-    return None
+    if result is None:
+        return None
+    requirements = result.get("requirements")
+    if not isinstance(requirements, list):
+        return None
+    return requirements
 
 
-def _call_with_retry(client: "anthropic.Anthropic", prompt: str) -> list | None:
+def _call_with_retry(prompt: str, api_key: str) -> list | None:
     """Call the model once; on an unparseable response, retry once with a stricter
     instruction (spec §8). Returns None only if both calls fail to parse. Shared by
     `extract_requirements` and `extract_requirements_raw` so the retry policy lives in
     exactly one place."""
     try:
-        raw_requirements = _call_model(client, prompt)
+        raw_requirements = _call_model(prompt, api_key)
     except Exception:
         raw_requirements = None
 
     if raw_requirements is None:
         try:
-            raw_requirements = _call_model(client, prompt + _RETRY_INSTRUCTION)
+            raw_requirements = _call_model(prompt + _RETRY_INSTRUCTION, api_key)
         except Exception:
             raw_requirements = None
 
@@ -110,9 +98,8 @@ def extract_requirements_raw(document_text: str, api_key: str) -> list[dict]:
     validation -- the gold-set harness only measures recall against what was extracted, so
     unlike `extract_requirements` it has no need for an `extraction_failed` flag.
     """
-    client = anthropic.Anthropic(api_key=api_key)
     prompt = build_extraction_prompt(document_text)
-    raw_requirements = _call_with_retry(client, prompt)
+    raw_requirements = _call_with_retry(prompt, api_key)
     if raw_requirements is None:
         return []
 
@@ -145,8 +132,7 @@ def extract_requirements(
         document_text = f.read()
 
     prompt = build_extraction_prompt(document_text)
-    client = anthropic.Anthropic(api_key=api_key)
-    raw_requirements = _call_with_retry(client, prompt)
+    raw_requirements = _call_with_retry(prompt, api_key)
 
     if raw_requirements is None:
         return [], True

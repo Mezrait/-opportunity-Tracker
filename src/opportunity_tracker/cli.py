@@ -112,7 +112,7 @@ def discover_command(
     ),
 ) -> None:
     """Run filter-driven discovery: filter.yaml -> candidate rows."""
-    api_key = config.get_anthropic_api_key()
+    api_key = config.get_tavily_api_key()
     conn = _open_db()
     filter_row = filters.sync_filter(config.FILTER_PATH, conn)
     run_row = discovery_run.run_discovery(filter_row, conn, api_key, force_rediscover=rediscover)
@@ -192,7 +192,7 @@ def extract_pending_command() -> None:
     are reported separately below as skipped, so they stay visible instead of silently
     disappearing from the run.
     """
-    api_key = config.get_anthropic_api_key()
+    api_key = config.get_groq_api_key()
     conn = _open_db()
     pending = conn.execute(
         "SELECT award.id AS award_id, latest.document_id AS document_id "
@@ -366,7 +366,8 @@ def dig_command(
     kind: str = typer.Option(..., "--kind", help="RequirementKind value to dig for, e.g. 'deadline'."),
 ) -> None:
     """Run the bounded digger for one missing required field on one award."""
-    api_key = config.get_anthropic_api_key()
+    search_api_key = config.get_tavily_api_key()
+    llm_api_key = config.get_groq_api_key()
     conn = _open_db()
     award_row = conn.execute(
         "SELECT canonical_url FROM award WHERE id = ?", (award_id,)
@@ -380,7 +381,9 @@ def dig_command(
     # digger's crawl reach uwa.edu.au's course-rules pages -- the exact UWA case that
     # motivated the tool.
     registrable = urls.registrable_domain(award_row["canonical_url"])
-    result = digger_run.dig(award_id, RequirementKind(kind), registrable, conn, api_key)
+    result = digger_run.dig(
+        award_id, RequirementKind(kind), registrable, conn, search_api_key, llm_api_key
+    )
     if result is None:
         typer.echo(f"Digger found nothing for award {award_id}, kind '{kind}'.")
     else:

@@ -90,7 +90,8 @@ def _seed_db(tmp_path):
 
 def test_extract_pending_excludes_failed_fetch_document_and_does_not_crash(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
     conn = _seed_db(tmp_path)
     conn.execute(
         "INSERT INTO award (scheme_id, institution, country, degree_levels, intake_year, "
@@ -272,7 +273,8 @@ def test_evaluate_all_passes_profile_instance_and_gold_set_dict(tmp_path, monkey
 
 def test_extract_pending_passes_document_instance_and_unpacks_tuple(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
     conn = _seed_db(tmp_path)
     conn.execute(
         "INSERT INTO award (scheme_id, institution, country, degree_levels, intake_year, "
@@ -363,7 +365,8 @@ def test_fetch_pending_passes_candidate_declared_tier_to_the_fetcher(tmp_path, m
 
 def test_dig_passes_requirement_kind_enum_and_correct_registrable_domain(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
     conn = _seed_db(tmp_path)
     conn.execute(
         "INSERT INTO award (scheme_id, institution, country, degree_levels, intake_year, "
@@ -374,7 +377,7 @@ def test_dig_passes_requirement_kind_enum_and_correct_registrable_domain(tmp_pat
 
     captured = {}
 
-    def fake_dig(award_id, missing_kind, registrable_domain, conn_arg, api_key):
+    def fake_dig(award_id, missing_kind, registrable_domain, conn_arg, search_api_key, llm_api_key):
         captured["award_id"] = award_id
         captured["missing_kind"] = missing_kind
         captured["registrable_domain"] = registrable_domain
@@ -394,7 +397,8 @@ def test_dig_derives_an_etld_plus_one_not_a_bare_netloc(tmp_path, monkeypatch):
     scholarships.uwa.edu.au scoped the crawl to that host and could never reach
     uwa.edu.au's course-rules pages -- the exact UWA case that motivated the tool."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
     conn = _seed_db(tmp_path)
     conn.execute(
         "INSERT INTO award (scheme_id, institution, country, degree_levels, intake_year, "
@@ -406,7 +410,7 @@ def test_dig_derives_an_etld_plus_one_not_a_bare_netloc(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_dig(award_id, missing_kind, registrable_domain, conn_arg, api_key):
+    def fake_dig(award_id, missing_kind, registrable_domain, conn_arg, search_api_key, llm_api_key):
         captured["registrable_domain"] = registrable_domain
         return None
 

@@ -1,22 +1,38 @@
 # tests/unit/digger/test_run.py
 """Tests for the bounded digger. websearch.search_domain, fetcher.pipeline.fetch, and
-anthropic.Anthropic are all mocked -- this suite never calls a real search API,
-fetches over a real network, or calls a real LLM."""
+groq.Groq are all mocked -- this suite never calls a real search API, fetches over a
+real network, or calls a real LLM."""
+import json
+
 from opportunity_tracker.db import get_connection, init_db
 from opportunity_tracker.digger.run import _extract_same_domain_links, dig
 from opportunity_tracker.models import Document, FetchMethod, RequirementKind, SourceTier
 
 
-class _FakeToolUseBlock:
-    def __init__(self, name, input_):
-        self.type = "tool_use"
+class _FakeFunctionCall:
+    def __init__(self, name, arguments: dict):
         self.name = name
-        self.input = input_
+        self.arguments = json.dumps(arguments)
+
+
+class _FakeToolCall:
+    def __init__(self, name, arguments: dict):
+        self.function = _FakeFunctionCall(name, arguments)
+
+
+class _FakeMessage:
+    def __init__(self, tool_calls):
+        self.tool_calls = tool_calls
+
+
+class _FakeChoice:
+    def __init__(self, message):
+        self.message = message
 
 
 class _FakeResponse:
-    def __init__(self, content):
-        self.content = content
+    def __init__(self, choices):
+        self.choices = choices
 
 
 def _found_response(**fields):
@@ -30,25 +46,23 @@ def _found_response(**fields):
         "confidence": None,
     }
     payload.update(fields)
-    return _FakeResponse(content=[_FakeToolUseBlock("record_requirement", payload)])
+    return _FakeResponse(
+        choices=[_FakeChoice(_FakeMessage(tool_calls=[_FakeToolCall("record_requirement", payload)]))]
+    )
 
 
 def _not_found_response():
+    payload = {
+        "found": False,
+        "operator": None,
+        "value": None,
+        "unit": None,
+        "raw_text": None,
+        "evidence": None,
+        "confidence": None,
+    }
     return _FakeResponse(
-        content=[
-            _FakeToolUseBlock(
-                "record_requirement",
-                {
-                    "found": False,
-                    "operator": None,
-                    "value": None,
-                    "unit": None,
-                    "raw_text": None,
-                    "evidence": None,
-                    "confidence": None,
-                },
-            )
-        ]
+        choices=[_FakeChoice(_FakeMessage(tool_calls=[_FakeToolCall("record_requirement", payload)]))]
     )
 
 
@@ -80,7 +94,7 @@ def test_dig_finds_field_via_web_search_uses_one_fetch(mocker, tmp_path):
         return_value=_make_document(1, doc_path, "https://uwa.edu.au/found"),
     )
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _found_response(
+    fake_client.chat.completions.create.return_value = _found_response(
         operator="=",
         value="2027-03-15",
         unit=None,
@@ -88,7 +102,7 @@ def test_dig_finds_field_via_web_search_uses_one_fetch(mocker, tmp_path):
         evidence=doc_text,
         confidence=0.9,
     )
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
 
     conn = mocker.MagicMock()
     conn.execute.return_value.lastrowid = 42
@@ -98,14 +112,15 @@ def test_dig_finds_field_via_web_search_uses_one_fetch(mocker, tmp_path):
         missing_kind=RequirementKind.DEADLINE,
         registrable_domain="uwa.edu.au",
         conn=conn,
-        api_key="sk-test",
+        search_api_key="tvly-test",
+        llm_api_key="gsk-test",
     )
 
     assert requirement is not None
     assert requirement.kind == RequirementKind.DEADLINE
     assert requirement.value == "2027-03-15"
     fetch_mock.assert_called_once_with("https://uwa.edu.au/found", conn)
-    fake_client.messages.create.assert_called_once()
+    fake_client.chat.completions.create.assert_called_once()
 
 
 def test_dig_falls_back_to_crawl_when_search_finds_nothing(mocker, tmp_path):
@@ -130,7 +145,7 @@ def test_dig_falls_back_to_crawl_when_search_finds_nothing(mocker, tmp_path):
     )
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.side_effect = [
+    fake_client.chat.completions.create.side_effect = [
         _not_found_response(),
         _found_response(
             operator=">=",
@@ -141,7 +156,7 @@ def test_dig_falls_back_to_crawl_when_search_finds_nothing(mocker, tmp_path):
             confidence=0.92,
         ),
     ]
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
 
     conn = mocker.MagicMock()
     conn.execute.return_value.lastrowid = 99
@@ -151,7 +166,8 @@ def test_dig_falls_back_to_crawl_when_search_finds_nothing(mocker, tmp_path):
         missing_kind=RequirementKind.ENGLISH_TEST,
         registrable_domain="uwa.edu.au",
         conn=conn,
-        api_key="sk-test",
+        search_api_key="tvly-test",
+        llm_api_key="gsk-test",
     )
 
     assert requirement is not None
@@ -185,8 +201,8 @@ def test_dig_returns_none_when_budget_exhausted(mocker, tmp_path):
     )
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _not_found_response()
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    fake_client.chat.completions.create.return_value = _not_found_response()
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
 
     conn = mocker.MagicMock()
 
@@ -195,7 +211,8 @@ def test_dig_returns_none_when_budget_exhausted(mocker, tmp_path):
         missing_kind=RequirementKind.MIN_GRADE,
         registrable_domain="uwa.edu.au",
         conn=conn,
-        api_key="sk-test",
+        search_api_key="tvly-test",
+        llm_api_key="gsk-test",
     )
 
     assert requirement is None
@@ -276,9 +293,9 @@ def test_extract_same_domain_links_dedupes_href_and_bare_url_for_one_target():
 
 
 def test_dig_does_not_raise_when_llm_call_fails(mocker, tmp_path):
-    """client.messages.create raising (rate limit, timeout, network blip) must
-    never propagate out of dig() -- the contract is 'never raise', with a
-    confirmed-not-found treated as ordinary data, not a crash."""
+    """The LLM call raising (rate limit, timeout, network blip) must never propagate
+    out of dig() -- the contract is 'never raise', with a confirmed-not-found treated
+    as ordinary data, not a crash."""
     doc_text = "Some page text that never gets read by a working LLM call."
     doc_path = tmp_path / "page.txt"
     doc_path.write_text(doc_text, encoding="utf-8")
@@ -296,8 +313,8 @@ def test_dig_does_not_raise_when_llm_call_fails(mocker, tmp_path):
     )
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.side_effect = RuntimeError("transient API failure")
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    fake_client.chat.completions.create.side_effect = RuntimeError("transient API failure")
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
 
     conn = mocker.MagicMock()
 
@@ -306,7 +323,8 @@ def test_dig_does_not_raise_when_llm_call_fails(mocker, tmp_path):
         missing_kind=RequirementKind.DEADLINE,
         registrable_domain="uwa.edu.au",
         conn=conn,
-        api_key="sk-test",
+        search_api_key="tvly-test",
+        llm_api_key="gsk-test",
     )
 
     assert requirement is None
@@ -344,17 +362,18 @@ def test_dig_never_writes_a_requirement_from_a_non_tier_1_document(mocker, tmp_p
     mocker.patch("opportunity_tracker.digger.run.pipeline.fetch", return_value=tier3_doc)
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _found_response(
+    fake_client.chat.completions.create.return_value = _found_response(
         operator="=", value="2027-03-15", raw_text=doc_text, evidence=doc_text, confidence=0.9
     )
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
 
     requirement = dig(
         award_id=7,
         missing_kind=RequirementKind.DEADLINE,
         registrable_domain="aggregator.example",
         conn=conn,
-        api_key="sk-test",
+        search_api_key="tvly-test",
+        llm_api_key="gsk-test",
     )
 
     assert requirement is None

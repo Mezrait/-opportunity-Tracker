@@ -1,8 +1,10 @@
-"""Tests for the extractor run: a single (or retried-once) Anthropic tool-use call
-per document, with evidence validation gating every insert. anthropic.Anthropic and
-evidence.validate_evidence are both mocked -- this suite never calls the real
-Anthropic API and never depends on evidence.py's real fuzzy-matching logic (that is
-covered separately in test_evidence.py)."""
+"""Tests for the extractor run: a single (or retried-once) forced tool call per
+document, with evidence validation gating every insert. groq.Groq and
+evidence.validate_evidence are both mocked -- this suite never calls the real Groq
+API and never depends on evidence.py's real fuzzy-matching logic (that is covered
+separately in test_evidence.py)."""
+import json
+
 import pytest
 
 from opportunity_tracker.db import get_connection, init_db
@@ -47,32 +49,52 @@ def _make_document(text_path: str, source_tier: SourceTier = SourceTier.TIER_1) 
     )
 
 
-class _FakeToolUseBlock:
-    def __init__(self, name, input_):
-        self.type = "tool_use"
+class _FakeFunctionCall:
+    """Shaped like the Groq SDK's tool_call.function: .name, .arguments (a JSON string)."""
+
+    def __init__(self, name, arguments: dict):
         self.name = name
-        self.input = input_
+        self.arguments = json.dumps(arguments)
 
 
-class _FakeTextBlock:
-    def __init__(self, text):
-        self.type = "text"
-        self.text = text
+class _FakeToolCall:
+    def __init__(self, name, arguments: dict):
+        self.function = _FakeFunctionCall(name, arguments)
+
+
+class _FakeMessage:
+    def __init__(self, tool_calls):
+        self.tool_calls = tool_calls
+
+
+class _FakeChoice:
+    def __init__(self, message):
+        self.message = message
 
 
 class _FakeResponse:
-    def __init__(self, content):
-        self.content = content
+    def __init__(self, choices):
+        self.choices = choices
 
 
 def _good_response(requirements):
     return _FakeResponse(
-        content=[_FakeToolUseBlock("record_requirements", {"requirements": requirements})]
+        choices=[
+            _FakeChoice(
+                _FakeMessage(
+                    tool_calls=[
+                        _FakeToolCall("record_requirements", {"requirements": requirements})
+                    ]
+                )
+            )
+        ]
     )
 
 
 def _unparseable_response():
-    return _FakeResponse(content=[_FakeTextBlock("sorry, I can't do that")])
+    # No matching tool call -- the model responded with plain text instead, or with
+    # no tool_calls at all.
+    return _FakeResponse(choices=[_FakeChoice(_FakeMessage(tool_calls=[]))])
 
 
 def test_clean_single_requirement_response_inserts_one_row(mocker, conn, tmp_path):
@@ -85,7 +107,7 @@ def test_clean_single_requirement_response_inserts_one_row(mocker, conn, tmp_pat
     document = _make_document(str(doc_path))
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _good_response(
+    fake_client.chat.completions.create.return_value = _good_response(
         [
             {
                 "kind": "research_project_fraction",
@@ -98,19 +120,19 @@ def test_clean_single_requirement_response_inserts_one_row(mocker, conn, tmp_pat
             }
         ]
     )
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
     mocker.patch(
         "opportunity_tracker.extractor.evidence.validate_evidence", return_value=True
     )
 
     requirements, extraction_failed = extract_requirements(
-        document, award_id=1, conn=conn, api_key="sk-test"
+        document, award_id=1, conn=conn, api_key="gsk-test"
     )
 
     assert extraction_failed is False
     assert len(requirements) == 1
     assert requirements[0].kind.value == "research_project_fraction"
-    fake_client.messages.create.assert_called_once()
+    fake_client.chat.completions.create.assert_called_once()
 
     row = conn.execute("SELECT * FROM requirement").fetchone()
     assert row["kind"] == "research_project_fraction"
@@ -123,7 +145,7 @@ def test_evidence_validation_failure_produces_zero_rows_no_crash(mocker, conn, t
     document = _make_document(str(doc_path))
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _good_response(
+    fake_client.chat.completions.create.return_value = _good_response(
         [
             {
                 "kind": "deadline",
@@ -136,13 +158,13 @@ def test_evidence_validation_failure_produces_zero_rows_no_crash(mocker, conn, t
             }
         ]
     )
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
     mocker.patch(
         "opportunity_tracker.extractor.evidence.validate_evidence", return_value=False
     )
 
     requirements, extraction_failed = extract_requirements(
-        document, award_id=1, conn=conn, api_key="sk-test"
+        document, award_id=1, conn=conn, api_key="gsk-test"
     )
 
     assert extraction_failed is False
@@ -157,7 +179,7 @@ def test_unparseable_first_response_then_retry_succeeds(mocker, conn, tmp_path):
     document = _make_document(str(doc_path))
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.side_effect = [
+    fake_client.chat.completions.create.side_effect = [
         _unparseable_response(),
         _good_response(
             [
@@ -173,18 +195,18 @@ def test_unparseable_first_response_then_retry_succeeds(mocker, conn, tmp_path):
             ]
         ),
     ]
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
     mocker.patch(
         "opportunity_tracker.extractor.evidence.validate_evidence", return_value=True
     )
 
     requirements, extraction_failed = extract_requirements(
-        document, award_id=1, conn=conn, api_key="sk-test"
+        document, award_id=1, conn=conn, api_key="gsk-test"
     )
 
     assert extraction_failed is False
     assert len(requirements) == 1
-    assert fake_client.messages.create.call_count == 2
+    assert fake_client.chat.completions.create.call_count == 2
 
 
 def test_both_calls_unparseable_returns_extraction_failed(mocker, conn, tmp_path):
@@ -193,19 +215,19 @@ def test_both_calls_unparseable_returns_extraction_failed(mocker, conn, tmp_path
     document = _make_document(str(doc_path))
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.side_effect = [
+    fake_client.chat.completions.create.side_effect = [
         _unparseable_response(),
         _unparseable_response(),
     ]
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
 
     requirements, extraction_failed = extract_requirements(
-        document, award_id=1, conn=conn, api_key="sk-test"
+        document, award_id=1, conn=conn, api_key="gsk-test"
     )
 
     assert requirements == []
     assert extraction_failed is True
-    assert fake_client.messages.create.call_count == 2
+    assert fake_client.chat.completions.create.call_count == 2
 
 
 # --- Principle 2: only Tier 1 sources write to fields (whole-branch review C1) -------------
@@ -217,7 +239,7 @@ def test_non_tier_1_document_logs_instead_of_writing_requirement(mocker, conn, t
     document = _make_document(str(doc_path), source_tier=tier)
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _good_response(
+    fake_client.chat.completions.create.return_value = _good_response(
         [
             {
                 "kind": "deadline",
@@ -230,13 +252,13 @@ def test_non_tier_1_document_logs_instead_of_writing_requirement(mocker, conn, t
             }
         ]
     )
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
     mocker.patch(
         "opportunity_tracker.extractor.evidence.validate_evidence", return_value=True
     )
 
     requirements, extraction_failed = extract_requirements(
-        document, award_id=1, conn=conn, api_key="sk-test"
+        document, award_id=1, conn=conn, api_key="gsk-test"
     )
 
     assert extraction_failed is False
@@ -257,7 +279,7 @@ def test_tier_1_document_still_writes_requirement(mocker, conn, tmp_path):
     document = _make_document(str(doc_path), source_tier=SourceTier.TIER_1)
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _good_response(
+    fake_client.chat.completions.create.return_value = _good_response(
         [
             {
                 "kind": "deadline",
@@ -270,12 +292,12 @@ def test_tier_1_document_still_writes_requirement(mocker, conn, tmp_path):
             }
         ]
     )
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
     mocker.patch(
         "opportunity_tracker.extractor.evidence.validate_evidence", return_value=True
     )
 
-    requirements, _ = extract_requirements(document, award_id=1, conn=conn, api_key="sk-test")
+    requirements, _ = extract_requirements(document, award_id=1, conn=conn, api_key="gsk-test")
 
     assert len(requirements) == 1
     assert conn.execute("SELECT COUNT(*) AS n FROM unclassified_rule").fetchone()["n"] == 0
@@ -284,7 +306,7 @@ def test_tier_1_document_still_writes_requirement(mocker, conn, tmp_path):
 def test_extract_requirements_raw_returns_validated_candidate_dicts_no_db(mocker):
     document_text = "Minimum IELTS overall band score of 6.5."
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _good_response(
+    fake_client.chat.completions.create.return_value = _good_response(
         [
             {
                 "kind": "english_test",
@@ -297,11 +319,11 @@ def test_extract_requirements_raw_returns_validated_candidate_dicts_no_db(mocker
             }
         ]
     )
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
 
     from opportunity_tracker.extractor.run import extract_requirements_raw
 
-    results = extract_requirements_raw(document_text, api_key="sk-test")
+    results = extract_requirements_raw(document_text, api_key="gsk-test")
 
     assert results == [
         {
@@ -314,4 +336,4 @@ def test_extract_requirements_raw_returns_validated_candidate_dicts_no_db(mocker
             "confidence": 0.9,
         }
     ]
-    fake_client.messages.create.assert_called_once()
+    fake_client.chat.completions.create.assert_called_once()

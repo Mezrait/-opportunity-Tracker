@@ -14,7 +14,11 @@ def _isolated_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setattr(config, "PROFILE_PATH", str(tmp_path / "profile.yaml"))
     monkeypatch.setattr(config, "SEEDS_PATH", str(tmp_path / "seeds.yaml"))
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # Fake, not real, credentials -- config.py's load_dotenv() picks up whatever real
+    # GROQ_API_KEY/TAVILY_API_KEY live in this repo's real .env otherwise, and a test
+    # that reaches far enough into the pipeline would silently spend real API credits.
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
     Path(config.PROFILE_PATH).write_text(
         "degree_level: phd\nnationality: Testland\n", encoding="utf-8"
     )

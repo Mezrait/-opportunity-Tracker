@@ -115,7 +115,8 @@ def _run_pipeline(filter_id: int) -> None:
     try:
         conn = db.get_connection(config.DB_PATH)
         db.init_db(conn)
-        api_key = config.get_anthropic_api_key()
+        search_api_key = config.get_tavily_api_key()
+        llm_api_key = config.get_groq_api_key()
 
         _ensure_institution_directory_loaded(conn)
 
@@ -131,14 +132,14 @@ def _run_pipeline(filter_id: int) -> None:
 
         RUN_STATE.phase = "discovering"
         RUN_STATE.add_log(f"Starting discovery for '{filter_obj.name}'...")
-        _run_discovery_with_polling(filter_obj, conn, api_key)
+        _run_discovery_with_polling(filter_obj, conn, search_api_key)
 
         if Path(config.SEEDS_PATH).exists():
             pinned = discovery_run.ingest_manual_pins(config.SEEDS_PATH, conn)
             RUN_STATE.add_log(f"Ingested {len(pinned)} manual pin(s).")
 
         _run_fetch_phase(conn)
-        _run_extract_phase(conn, api_key)
+        _run_extract_phase(conn, llm_api_key)
         _run_evaluate_phase(conn)
 
         RUN_STATE.phase = "done"
@@ -153,7 +154,9 @@ def _run_pipeline(filter_id: int) -> None:
             conn.close()
 
 
-def _run_discovery_with_polling(filter_obj: Filter, conn: sqlite3.Connection, api_key: str) -> None:
+def _run_discovery_with_polling(
+    filter_obj: Filter, conn: sqlite3.Connection, search_api_key: str
+) -> None:
     # `conn` was created in THIS thread (by _run_pipeline) and sqlite3 connections are
     # thread-affine by default (db.get_connection does not pass check_same_thread=False,
     # confirmed in db.py) -- so run_discovery(..., conn, ...) must stay on this thread.
@@ -173,7 +176,9 @@ def _run_discovery_with_polling(filter_obj: Filter, conn: sqlite3.Connection, ap
     poller = threading.Thread(target=_poll_loop, daemon=True)
     poller.start()
     try:
-        run_row = discovery_run.run_discovery(filter_obj, conn, api_key, force_rediscover=False)
+        run_row = discovery_run.run_discovery(
+            filter_obj, conn, search_api_key, force_rediscover=False
+        )
     finally:
         stop_event.set()
         poller.join()
@@ -235,7 +240,7 @@ def _run_fetch_phase(conn: sqlite3.Connection) -> None:
     RUN_STATE.add_log(f"Fetch complete: {len(pending)} candidate(s) promoted.")
 
 
-def _run_extract_phase(conn: sqlite3.Connection, api_key: str) -> None:
+def _run_extract_phase(conn: sqlite3.Connection, llm_api_key: str) -> None:
     RUN_STATE.phase = "extracting"
     pending = conn.execute(
         "SELECT award.id AS award_id, latest.document_id AS document_id "
@@ -262,7 +267,7 @@ def _run_extract_phase(conn: sqlite3.Connection, api_key: str) -> None:
             fetch_status=doc_row["fetch_status"], degraded=bool(doc_row["degraded"]),
         )
         requirements, extraction_failed = extractor_run.extract_requirements(
-            document, row["award_id"], conn, api_key
+            document, row["award_id"], conn, llm_api_key
         )
         RUN_STATE.phase_current += 1
         if extraction_failed:

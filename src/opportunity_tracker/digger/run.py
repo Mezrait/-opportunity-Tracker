@@ -20,16 +20,12 @@ import sqlite3
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
-import anthropic
-
-from opportunity_tracker import urls
+from opportunity_tracker import llm_extract, urls
 from opportunity_tracker.discovery import websearch
 from opportunity_tracker.extractor import evidence
 from opportunity_tracker.fetcher import pipeline
 from opportunity_tracker.models import Document, Requirement, RequirementKind, SourceTier
 
-_MODEL = "claude-opus-5"
-_MAX_TOKENS = 1024
 _MAX_FETCHES = 5
 _MAX_DEPTH = 2
 
@@ -86,7 +82,7 @@ def _build_single_field_prompt(missing_kind: RequirementKind, document_text: str
 def _extract_single_field(
     document_text: str,
     missing_kind: RequirementKind,
-    api_key: str,
+    llm_api_key: str,
 ) -> dict | None:
     """Run a targeted, single-field version of the extractor prompt against
     `document_text`, looking only for `missing_kind`. Returns a candidate
@@ -98,45 +94,28 @@ def _extract_single_field(
     this page" rather than propagated.
     """
     prompt = _build_single_field_prompt(missing_kind, document_text)
-    client = anthropic.Anthropic(api_key=api_key)
 
     try:
-        response = client.messages.create(
-            model=_MODEL,
-            max_tokens=_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
-            tools=[
-                {
-                    "name": "record_requirement",
-                    "description": "Record whether the target requirement was found.",
-                    "input_schema": _SINGLE_FIELD_SCHEMA,
-                }
-            ],
-            tool_choice={"type": "tool", "name": "record_requirement"},
+        result = llm_extract.call_tool_forced(
+            prompt=prompt,
+            tool_name="record_requirement",
+            tool_description="Record whether the target requirement was found.",
+            input_schema=_SINGLE_FIELD_SCHEMA,
+            api_key=llm_api_key,
         )
     except Exception:
         return None
 
-    for block in getattr(response, "content", []):
-        if getattr(block, "type", None) != "tool_use":
-            continue
-        if getattr(block, "name", None) != "record_requirement":
-            continue
-        tool_input = getattr(block, "input", None)
-        if not isinstance(tool_input, dict):
-            continue
-        if not tool_input.get("found"):
-            return None
-        return {
-            "operator": tool_input.get("operator"),
-            "value": tool_input.get("value"),
-            "unit": tool_input.get("unit"),
-            "raw_text": tool_input.get("raw_text", ""),
-            "evidence": tool_input.get("evidence", ""),
-            "confidence": tool_input.get("confidence"),
-        }
-
-    return None
+    if result is None or not result.get("found"):
+        return None
+    return {
+        "operator": result.get("operator"),
+        "value": result.get("value"),
+        "unit": result.get("unit"),
+        "raw_text": result.get("raw_text", ""),
+        "evidence": result.get("evidence", ""),
+        "confidence": result.get("confidence"),
+    }
 
 
 def _extract_same_domain_links(
@@ -184,7 +163,7 @@ def _try_extract_and_insert(
     award_id: int,
     missing_kind: RequirementKind,
     conn: sqlite3.Connection,
-    api_key: str,
+    llm_api_key: str,
 ) -> Requirement | None:
     if document.text_path is None:
         return None
@@ -192,7 +171,7 @@ def _try_extract_and_insert(
     with open(document.text_path, "r", encoding="utf-8") as f:
         document_text = f.read()
 
-    candidate = _extract_single_field(document_text, missing_kind, api_key)
+    candidate = _extract_single_field(document_text, missing_kind, llm_api_key)
     if candidate is None:
         return None
 
@@ -260,7 +239,8 @@ def dig(
     missing_kind: RequirementKind,
     registrable_domain: str,
     conn: sqlite3.Connection,
-    api_key: str,
+    search_api_key: str,
+    llm_api_key: str,
 ) -> Requirement | None:
     """Bounded gap-filler for one award's one missing required field.
 
@@ -277,12 +257,19 @@ def dig(
     Never issues more than `_MAX_FETCHES` calls to fetcher.pipeline.fetch in
     total. Returns None -- a confirmed not-found, never an exception -- if the
     budget is exhausted with nothing found.
+
+    Takes two separate API keys since the two strategies use two different
+    providers: `search_api_key` (Tavily) for step 1's web search, `llm_api_key`
+    (Groq) for the single-field extraction both steps run against whatever page
+    text they fetch.
     """
     fetches_used = 0
     query = f"{missing_kind.value.replace('_', ' ')} requirement"
 
     try:
-        search_results = websearch.search_domain(registrable_domain, query, api_key, max_uses=1)
+        search_results = websearch.search_domain(
+            registrable_domain, query, search_api_key, max_uses=1
+        )
     except Exception:
         search_results = []
 
@@ -290,7 +277,7 @@ def dig(
         url = search_results[0]["url"]
         document = pipeline.fetch(url, conn)
         fetches_used += 1
-        requirement = _try_extract_and_insert(document, award_id, missing_kind, conn, api_key)
+        requirement = _try_extract_and_insert(document, award_id, missing_kind, conn, llm_api_key)
         if requirement is not None:
             return requirement
 
@@ -310,7 +297,7 @@ def dig(
         document = pipeline.fetch(url, conn)
         fetches_used += 1
 
-        requirement = _try_extract_and_insert(document, award_id, missing_kind, conn, api_key)
+        requirement = _try_extract_and_insert(document, award_id, missing_kind, conn, llm_api_key)
         if requirement is not None:
             return requirement
 

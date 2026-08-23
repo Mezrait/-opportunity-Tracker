@@ -25,10 +25,25 @@ SEEDS_PATH = "seeds.yaml"
 DENY_LIST_PATH = "data/tier3_deny_list.yaml"
 
 
-def get_anthropic_api_key() -> str:
-    key = os.environ.get("ANTHROPIC_API_KEY")
+def get_groq_api_key() -> str:
+    """Powers the extractor and digger's structured-extraction calls (spec §6.2, §6.3) --
+    swapped in from Anthropic 2026-08-23 for cost; see the web-UI design spec's decision
+    log. Groq's free tier (14,400 requests/day) comfortably covers a full run."""
+    key = os.environ.get("GROQ_API_KEY")
     if not key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and fill it in."
+            "GROQ_API_KEY is not set. Copy .env.example to .env and fill it in."
+        )
+    return key
+
+
+def get_tavily_api_key() -> str:
+    """Powers discovery and digger's web-search calls (spec §6.0, §6.3) -- swapped in
+    from Anthropic's web_search tool 2026-08-23 for cost. Tavily's free tier is 1,000
+    search credits/month, roughly 6-10 full runs at this tool's default institution_cap."""
+    key = os.environ.get("TAVILY_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "TAVILY_API_KEY is not set. Copy .env.example to .env and fill it in."
         )
     return key

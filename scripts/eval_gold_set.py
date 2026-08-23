@@ -3,7 +3,7 @@
 
 NOT a pytest suite — spec §9.2 is explicit that the extractor gets evaluation, not tests.
 This script reads real fixture files from tests/fixtures/gold_set/ and calls the real
-Anthropic API via extractor.run.extract_requirements_raw. It is meant to be run by the
+Groq API via extractor.run.extract_requirements_raw. It is meant to be run by the
 operator once that directory holds real hand-annotated documents:
 
     uv run python scripts/eval_gold_set.py
@@ -109,7 +109,7 @@ def main() -> int:
         )
         return 0
 
-    api_key = config.get_anthropic_api_key()
+    api_key = config.get_groq_api_key()
     documents = _load_gold_set(GOLD_SET_DIR)
 
     accumulated: dict[str, dict] = {}

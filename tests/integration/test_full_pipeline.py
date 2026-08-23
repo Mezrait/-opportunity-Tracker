@@ -6,11 +6,11 @@ robots.txt aborting the run on one dead host, a non-2xx error page reaching the 
 if it were content. Unit tests could not see any of them, because each one mocked the very
 boundary where the bug lived. This test mocks ONLY the true external boundaries:
 
-  * websearch.search_institution   (the Anthropic web_search server tool)
+  * websearch.search_institution   (the Tavily search API)
   * httpx.get                      (the network -- the real HTML extraction still runs)
   * urllib.request.urlopen         (robots.txt over the network)
   * time.sleep                     (the per-host rate limiter's wall clock)
-  * anthropic.Anthropic            (the extractor's model call)
+  * groq.Groq                      (the extractor's model call)
 
 Everything else -- the CLI commands, the schema, tiering, the fetch pipeline, evidence
 validation, the Tier 1 write gate, evaluation, bucketing and both reporters -- is the real
@@ -83,16 +83,32 @@ class _FakeHttpResponse:
         self.status_code = status_code
 
 
-class _FakeToolUseBlock:
-    def __init__(self, name, input_):
-        self.type = "tool_use"
+class _FakeFunctionCall:
+    """Shaped like the Groq SDK's tool_call.function: .name, .arguments (a JSON string)."""
+
+    def __init__(self, name, arguments: dict):
         self.name = name
-        self.input = input_
+        self.arguments = json.dumps(arguments)
+
+
+class _FakeToolCall:
+    def __init__(self, name, arguments: dict):
+        self.function = _FakeFunctionCall(name, arguments)
 
 
 class _FakeMessage:
-    def __init__(self, content):
-        self.content = content
+    def __init__(self, tool_calls):
+        self.tool_calls = tool_calls
+
+
+class _FakeChoice:
+    def __init__(self, message):
+        self.message = message
+
+
+class _FakeResponse:
+    def __init__(self, choices):
+        self.choices = choices
 
 
 class _FakeRobotsResponse:
@@ -106,7 +122,8 @@ def project(tmp_path, monkeypatch):
     and the deny-list the fetcher reads. cwd is tmp_path, so every relative path in
     config.py resolves inside it and nothing touches the developer's real database."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-test-not-a-real-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-not-a-real-key")
 
     (tmp_path / "profile.yaml").write_text(_PROFILE_YAML, encoding="utf-8")
     (tmp_path / "filter.yaml").write_text(_FILTER_YAML, encoding="utf-8")
@@ -132,7 +149,7 @@ def project(tmp_path, monkeypatch):
 
 @pytest.fixture
 def external_boundaries(mocker):
-    """Stub the network, the search server-tool, the model, and the rate limiter's clock.
+    """Stub the network, the search API, the model, and the rate limiter's clock.
     Nothing inside the pipeline itself is mocked."""
     mocker.patch(
         "opportunity_tracker.discovery.websearch.search_institution",
@@ -149,28 +166,34 @@ def external_boundaries(mocker):
     mocker.patch("opportunity_tracker.fetcher.robots.time.sleep")
 
     fake_client = mocker.MagicMock()
-    fake_client.messages.create.return_value = _FakeMessage(
-        content=[
-            _FakeToolUseBlock(
-                "record_requirements",
-                {
-                    "requirements": [
-                        {
-                            "kind": "deadline",
-                            "operator": None,
-                            "value": "2027-03-15",
-                            "unit": None,
-                            "raw_text": _DEADLINE_SENTENCE,
-                            "evidence": _DEADLINE_SENTENCE,
-                            "confidence": 0.95,
-                        }
+    fake_client.chat.completions.create.return_value = _FakeResponse(
+        choices=[
+            _FakeChoice(
+                _FakeMessage(
+                    tool_calls=[
+                        _FakeToolCall(
+                            "record_requirements",
+                            {
+                                "requirements": [
+                                    {
+                                        "kind": "deadline",
+                                        "operator": None,
+                                        "value": "2027-03-15",
+                                        "unit": None,
+                                        "raw_text": _DEADLINE_SENTENCE,
+                                        "evidence": _DEADLINE_SENTENCE,
+                                        "confidence": 0.95,
+                                    }
+                                ]
+                            },
+                        )
                     ]
-                },
+                )
             )
         ]
     )
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
-    return {"http_get": http_get, "anthropic_client": fake_client}
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
+    return {"http_get": http_get, "groq_client": fake_client}
 
 
 def _open_db(project_dir):
@@ -306,7 +329,7 @@ def test_pipeline_survives_a_dead_host_and_an_http_error_page(project, mocker):
         return_value=_FakeHttpResponse("Page not found. Try our site search. " * 20, 404),
     )
     fake_client = mocker.MagicMock()
-    mocker.patch("anthropic.Anthropic", return_value=fake_client)
+    mocker.patch("opportunity_tracker.llm_extract.Groq", return_value=fake_client)
 
     _invoke("init-db")
     _invoke("load-directory", "--version", "2026.1")
@@ -320,7 +343,7 @@ def test_pipeline_survives_a_dead_host_and_an_http_error_page(project, mocker):
     assert document["text_path"] is None
     # The error page never reached the extractor, so nothing was written as if it were real.
     assert conn.execute("SELECT COUNT(*) AS n FROM requirement").fetchone()["n"] == 0
-    fake_client.messages.create.assert_not_called()
+    fake_client.chat.completions.create.assert_not_called()
     conn.close()
 
     assert "extraction skipped, fetch failed" in result.stdout
