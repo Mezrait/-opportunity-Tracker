@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Run - Opportunity Tracker{% endblock %}
+
+{% block content %}
+<h1>Run</h1>
+
+{% if state.phase == "idle" %}
+  <div class="empty-state">
+    <p>No search is running — go to <a href="/searches">/searches</a> to start one.</p>
+  </div>
+{% elif state.phase == "failed" %}
+  <div class="flash flash-error">
+    <p>{{ state.error }}</p>
+  </div>
+  <p><a href="/searches">Back to Searches</a></p>
+{% else %}
+  {% if state.filter_name %}
+    <p>Search: <strong>{{ state.filter_name }}</strong></p>
+  {% endif %}
+
+  {% if state.phase in ["discovering", "fetching", "extracting", "evaluating"] %}
+    <div id="run-live">
+      <div class="progress-bar">
+        <div
+          id="progress-fill"
+          class="progress-fill"
+          style="width: {% if state.phase_total > 0 %}{{ ((state.phase_current / state.phase_total) * 100) | round | int }}{% else %}0{% endif %}%;"
+        ></div>
+      </div>
+      <p>Phase: <span id="run-phase">{{ state.phase }}</span></p>
+      <p>Progress: <span id="run-progress-text">{{ state.phase_current }} / {{ state.phase_total }}</span></p>
+      <p>Candidates found: <span id="run-candidates">{{ state.candidates_found }}</span></p>
+      <div id="run-log" style="max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.85em;">
+        {% for line in state.log %}
+          <div>{{ line }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    <script src="/static/poll.js"></script>
+  {% endif %}
+
+  {% if state.phase == "done" %}
+    <p>Run complete — {{ state.candidates_found }} candidate(s) found.</p>
+    <p><a href="/results">View results</a></p>
+  {% endif %}
+{% endif %}
+{% endblock %}
