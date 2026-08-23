@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Results - Opportunity Tracker{% endblock %}
+
+{% block content %}
+<h1>Results</h1>
+
+{% if not has_results %}
+  <div class="empty-state">
+    <p>No results yet — <a href="/searches">run a search first</a></p>
+  </div>
+{% else %}
+  <div>
+    <input
+      type="text"
+      id="result-filter"
+      placeholder="Filter by institution or country..."
+      style="width: 100%; padding: 8px; margin-bottom: 16px; font-size: 14px;"
+    />
+  </div>
+
+  {% for bucket in BUCKET_TITLES.keys() %}
+    {% if by_bucket[bucket] %}
+      <div class="bucket-section">
+        <h2 class="bucket-header">{{ BUCKET_TITLES[bucket] }}</h2>
+        <div>
+          {% for evaluation in by_bucket[bucket] %}
+            {% set award = awards_by_id[evaluation.award_id] %}
+            <div class="result-row" style="padding: 12px; border-bottom: 1px solid #e0e0e0;">
+              <div style="display: flex; justify-content: space-between; align-items: start;">
+                <div>
+                  <div style="font-weight: 600;">{{ award.institution }}</div>
+                  <div style="color: #666; font-size: 0.9em;">
+                    {{ award.country }}
+                    {% set days = evaluation.sort_keys.get('days_until_deadline') %}
+                    {% if days is not none %}
+                      • {{ days }} days
+                    {% else %}
+                      • —
+                    {% endif %}
+                  </div>
+                </div>
+                <div style="text-align: right;">
+                  {% for kind, outcome in evaluation.per_requirement_outcomes.items() %}
+                    <span class="badge badge-{{ outcome.lower() }}">{{ kind }}: {{ outcome }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+              <div style="margin-top: 8px;">
+                <a href="{{ award.canonical_url }}" target="_blank" style="word-break: break-all;">{{ award.canonical_url }}</a>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  {% endfor %}
+
+  <script>
+    (function() {
+      var filterInput = document.getElementById('result-filter');
+      if (!filterInput) return;
+
+      function applyFilter() {
+        var query = filterInput.value.toLowerCase();
+        var rows = document.querySelectorAll('.result-row');
+        rows.forEach(function(row) {
+          var text = row.textContent.toLowerCase();
+          if (query === '' || text.includes(query)) {
+            row.style.display = '';
+          } else {
+            row.style.display = 'none';
+          }
+        });
+      }
+
+      filterInput.addEventListener('input', applyFilter);
+    })();
+  </script>
+{% endif %}
+{% endblock %}
