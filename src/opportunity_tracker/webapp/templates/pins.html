@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Pinned Links - Opportunity Tracker{% endblock %}
+
+{% block content %}
+<h1>Pinned Links</h1>
+<p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+  Operator-curated URLs for opportunities discovery might miss (directory gaps, search
+  misses). Pinned entries flow through the same fetch/extract/evaluate pipeline as
+  discovered ones.
+</p>
+
+{% if not has_pins %}
+  <div class="empty-state">
+    <p>No pinned links yet -- add one below.</p>
+  </div>
+{% else %}
+  <div class="card" style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr style="text-align: left; border-bottom: 1px solid var(--border-color);">
+          <th style="padding: 0.5rem;">Institution</th>
+          <th style="padding: 0.5rem;">Country</th>
+          <th style="padding: 0.5rem;">URL</th>
+          <th style="padding: 0.5rem;">Declared tier</th>
+          <th style="padding: 0.5rem;">Pinned at</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pin in pins %}
+          <tr style="border-bottom: 1px solid var(--border-color);">
+            <td style="padding: 0.5rem;">{{ pin.institution_name }}</td>
+            <td style="padding: 0.5rem;">{{ pin.country }}</td>
+            <td style="padding: 0.5rem; word-break: break-all;">
+              <a href="{{ pin.url }}" target="_blank">{{ pin.url }}</a>
+            </td>
+            <td style="padding: 0.5rem;">{{ pin.declared_tier if pin.declared_tier is not none else "—" }}</td>
+            <td style="padding: 0.5rem;">{{ pin.found_at }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+<div class="card" style="max-width: 32rem;">
+  <h2 style="margin-bottom: 1rem;">Add a link</h2>
+  <form method="post" action="/pins/add">
+    <div class="form-group">
+      <label for="institution_domain">Institution domain</label>
+      <input
+        type="text" id="institution_domain" name="institution_domain"
+        placeholder="uwa.edu.au" required
+      >
+    </div>
+
+    <div class="form-group">
+      <label for="url">URL</label>
+      <input
+        type="text" id="url" name="url"
+        placeholder="https://www.uwa.edu.au/study/scholarships/international-rtp" required
+      >
+    </div>
+
+    <div class="form-group">
+      <label for="name">Name <span style="color: var(--text-muted); font-weight: normal;">(optional)</span></label>
+      <input type="text" id="name" name="name" placeholder="Only needed if the domain is unknown">
+    </div>
+
+    <div class="form-group">
+      <label for="country">Country <span style="color: var(--text-muted); font-weight: normal;">(optional)</span></label>
+      <input type="text" id="country" name="country" placeholder="Only needed if the domain is unknown">
+    </div>
+
+    <div class="form-group">
+      <label for="declared_tier">Declared tier <span style="color: var(--text-muted); font-weight: normal;">(optional)</span></label>
+      <select id="declared_tier" name="declared_tier">
+        <option value="">-- leave automatic --</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+      </select>
+      <p style="color: var(--text-muted); font-size: 0.85em; margin-top: 0.35rem;">
+        Only set this for a site you've personally verified is the awarding body's own —
+        it lets that page write fields even if the tool wouldn't otherwise trust it.
+      </p>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Add link</button>
+  </form>
+</div>
+{% endblock %}
