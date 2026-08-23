@@ -197,3 +197,64 @@ def test_search_with_evaluation_shows_act_now_count(client, seeded_db, app):
     assert "Act Now: 1" in text
     # The stale COVERAGE_GAP evaluation must not also be counted -- only 1 award total.
     assert "Coverage Gap: 1" not in text
+
+
+def test_bucket_breakdown_does_not_double_count_award_reached_via_two_candidates(
+    client, seeded_db, app
+):
+    """A saved search re-run after the discovery cache's staleness window expires can
+    re-surface a URL it already knows about -- producing a SECOND candidate row (under
+    a different discovery_run) that gets promoted to the SAME award as an earlier
+    candidate. The bucket-breakdown query must count that award once, not once per
+    candidate that points at it."""
+    _insert_filter(seeded_db)
+    _insert_discovery_run(seeded_db, run_id=1, status=DiscoveryRunStatus.COMPLETED.value)
+    _insert_discovery_run(seeded_db, run_id=2, status=DiscoveryRunStatus.COMPLETED.value)
+    seeded_db.execute(
+        "INSERT INTO institution (id, name, country, country_code, domain, source, "
+        "directory_version, added_at) VALUES (1, 'Test Uni', 'United Kingdom', 'GB', "
+        "'test.ac.uk', 'manual', NULL, '2026-08-01T00:00:00')"
+    )
+    seeded_db.execute(
+        "INSERT INTO award (id, scheme_id, institution, country, degree_levels, "
+        "intake_year, canonical_url) VALUES (1, NULL, 'Test Uni', 'United Kingdom', "
+        "'[\"phd\"]', 2027, 'https://test.ac.uk/award')"
+    )
+    # Two candidate rows, from two different discovery_run rows under the same filter,
+    # both promoted to the SAME award -- this is the double-counting scenario.
+    seeded_db.execute(
+        "INSERT INTO candidate (id, discovery_run_id, institution_id, url, query_used, "
+        "found_at, promoted_to_award_id, declared_tier) VALUES (1, 1, 1, "
+        "'https://test.ac.uk/award', 'phd physics', '2026-08-21T00:30:00', 1, 1)"
+    )
+    seeded_db.execute(
+        "INSERT INTO candidate (id, discovery_run_id, institution_id, url, query_used, "
+        "found_at, promoted_to_award_id, declared_tier) VALUES (2, 2, 1, "
+        "'https://test.ac.uk/award', 'phd physics', '2026-08-22T00:30:00', 1, 1)"
+    )
+    seeded_db.execute(
+        "INSERT INTO profile (version, created_at, attributes) VALUES "
+        "(1, '2026-08-20T00:00:00', ?)",
+        (json.dumps({"degree_level": "phd"}),),
+    )
+    # A single evaluation for that one award.
+    seeded_db.execute(
+        "INSERT INTO evaluation (id, award_id, profile_version, evaluated_at, bucket, "
+        "sort_keys, per_requirement_outcomes) VALUES (1, 1, 1, '2026-08-21T01:00:00', ?, "
+        "?, ?)",
+        (
+            Bucket.ACT_NOW.value,
+            json.dumps({"unknown_count": 0, "days_until_deadline": 30, "funding_completeness": 1.0}),
+            json.dumps({"deadline": "pass"}),
+        ),
+    )
+    seeded_db.commit()
+    _override(app, seeded_db)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    text = response.text
+    assert "PhD Physics UK" in text
+    assert "Act Now: 1" in text
+    assert "Act Now: 2" not in text

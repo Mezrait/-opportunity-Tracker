@@ -5,11 +5,20 @@ Profile completeness (spec §3.4): the profile has exactly 11 attribute keys
 a boolean `false` (e.g. has_transcripts, supervisor_confirmed) is a real, deliberate
 answer and counts as SET, not "unknown". Use `is not None`, never a truthy check.
 
-Per-search bucket breakdown (spec §3.4) joins evaluation -> award -> candidate ->
-discovery_run to scope evaluations to the awards a given saved search actually
-produced, and dedups to the latest evaluation per award_id -- evaluation is an
-append-only log, so a re-evaluated award would otherwise be counted once per row
-instead of once per award. See routes_results.py for the same dedup pattern.
+Per-search bucket breakdown (spec §3.4) scopes evaluations to the distinct set of
+awards a given saved search actually produced -- found via a subquery joining
+award -> candidate -> discovery_run -- and dedups to the latest evaluation per
+award_id. Two joins matter here, for different reasons:
+
+  * evaluation is an append-only log, so a re-evaluated award would otherwise be
+    counted once per evaluation row instead of once per award (see routes_results.py
+    for the same dedup pattern).
+  * candidate.promoted_to_award_id is NOT unique: re-running a saved search after the
+    discovery cache's staleness window expires can re-surface a URL it already knows
+    about, producing a second candidate (under a different discovery_run) that gets
+    promoted to the SAME award. A naive `JOIN candidate` (rather than a `WHERE
+    award_id IN (SELECT DISTINCT ...)` subquery) would fan out to one row per
+    candidate and double-count that award's single evaluation bucket.
 """
 from __future__ import annotations
 
@@ -59,10 +68,12 @@ def dashboard_home(request: Request, conn: sqlite3.Connection = Depends(get_db))
             for b in conn.execute(
                 "SELECT e.bucket, COUNT(*) AS n "
                 "FROM evaluation e "
-                "JOIN award a ON a.id = e.award_id "
-                "JOIN candidate c ON c.promoted_to_award_id = a.id "
-                "JOIN discovery_run dr ON dr.id = c.discovery_run_id "
-                "WHERE dr.filter_id = ? "
+                "WHERE e.award_id IN ("
+                "  SELECT DISTINCT a.id FROM award a "
+                "  JOIN candidate c ON c.promoted_to_award_id = a.id "
+                "  JOIN discovery_run dr ON dr.id = c.discovery_run_id "
+                "  WHERE dr.filter_id = ?"
+                ") "
                 "AND e.id IN (SELECT MAX(id) FROM evaluation GROUP BY award_id) "
                 "GROUP BY e.bucket",
                 (row["id"],),
