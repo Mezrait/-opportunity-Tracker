@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Searches - Opportunity Tracker{% endblock %}
+
+{% block content %}
+<h1>Searches</h1>
+
+{% if has_searches %}
+  <p><a href="/searches/new" class="btn btn-primary">+ New Search</a></p>
+
+  <div class="card-grid">
+    {% for search in searches %}
+      <div class="card">
+        <h3>{{ search.name }}</h3>
+        <p>{{ search.country }}</p>
+        <p>{{ search.degree_levels | join(', ') }}</p>
+        <p>{{ search.fields | join(', ') }}</p>
+        <p>
+          <a href="/searches/{{ search.id }}/edit" class="btn">Edit</a>
+          <form method="post" action="/searches/{{ search.id }}/run" style="display: inline;">
+            <button type="submit" class="btn btn-primary">Run</button>
+          </form>
+        </p>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty-state">
+    <p>No searches yet -- <a href="/searches/new">create your first search</a></p>
+  </div>
+{% endif %}
+{% endblock %}
