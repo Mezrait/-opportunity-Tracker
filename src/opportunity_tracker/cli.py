@@ -404,6 +404,17 @@ def review_unclassified_command() -> None:
     conn.close()
 
 
+@app.command("serve")
+def serve_command(
+    port: int = typer.Option(8420, "--port", help="Local port to serve the web UI on."),
+) -> None:
+    """Start the local web UI (binds to 127.0.0.1 only, no auth)."""
+    import uvicorn
+
+    typer.echo(f"Starting Opportunity Tracker web UI at http://127.0.0.1:{port}")
+    uvicorn.run("opportunity_tracker.webapp.app:app", host="127.0.0.1", port=port)
+
+
 @app.command("run")
 def run_command(
     rediscover: bool = typer.Option(False, "--rediscover", help="Force a fresh discovery pass."),

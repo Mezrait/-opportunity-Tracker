@@ -20,3 +20,7 @@ data/gold_set_recall.json
 
 # Local git worktrees used for isolated subagent-driven-development work.
 .worktrees/
+
+# Web UI's per-saved-search filter files (spec §4.3) — same reasoning as
+# profile.yaml/filter.yaml/seeds.yaml above: operator-specific, not committed.
+web_filters/
