@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - Opportunity Tracker{% endblock %}
+
+{% block content %}
+<h1>Profile</h1>
+<p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+  Your own eligibility attributes -- saved here are written to <code>profile.yaml</code>
+  and synced into a new profile version whenever they actually change.
+</p>
+
+<div class="card" style="max-width: 40rem;">
+  <form method="post" action="/profile">
+
+    <div class="form-group">
+      <label for="research_project_fraction_held">Research project fraction held</label>
+      <input
+        type="number" step="0.01" min="0" max="1"
+        id="research_project_fraction_held" name="research_project_fraction_held"
+        value="{{ profile.research_project_fraction_held }}"
+      >
+    </div>
+
+    <div class="form-group">
+      <label for="english_test_result">English test result</label>
+      <input
+        type="text" id="english_test_result" name="english_test_result"
+        value="{{ profile.english_test_result }}"
+      >
+    </div>
+
+    <div class="form-group">
+      <label for="target_intake_year">Target intake year</label>
+      <input
+        type="number" step="1" id="target_intake_year" name="target_intake_year"
+        value="{{ profile.target_intake_year }}"
+      >
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input
+          type="checkbox" id="has_transcripts" name="has_transcripts" value="true"
+          {% if profile.has_transcripts %}checked{% endif %}
+        >
+        Has transcripts
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input
+          type="checkbox" id="supervisor_confirmed" name="supervisor_confirmed" value="true"
+          {% if profile.supervisor_confirmed %}checked{% endif %}
+        >
+        Supervisor confirmed
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label>Thesis required</label>
+      <div class="radio-group">
+        <label>
+          <input
+            type="radio" name="thesis_required" value="true"
+            {% if profile.thesis_required is true %}checked{% endif %}
+          >
+          Yes
+        </label>
+        <label>
+          <input
+            type="radio" name="thesis_required" value="false"
+            {% if profile.thesis_required is false %}checked{% endif %}
+          >
+          No
+        </label>
+        <label>
+          <input
+            type="radio" name="thesis_required" value=""
+            {% if profile.thesis_required is none %}checked{% endif %}
+          >
+          Unknown
+        </label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="degree_level">Degree level</label>
+      <select id="degree_level" name="degree_level">
+        <option value="" {% if not profile.degree_level %}selected{% endif %}>-- unset --</option>
+        <option value="phd" {% if profile.degree_level == 'phd' %}selected{% endif %}>PhD</option>
+        <option value="masters" {% if profile.degree_level == 'masters' %}selected{% endif %}>Masters</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="nationality">Nationality</label>
+      <input
+        type="text" id="nationality" name="nationality"
+        value="{{ profile.nationality }}"
+      >
+    </div>
+
+    <div class="form-group">
+      <label>Prior scholarship exclusion</label>
+      <div class="radio-group">
+        <label>
+          <input
+            type="radio" name="prior_scholarship_exclusion" value="true"
+            {% if profile.prior_scholarship_exclusion is true %}checked{% endif %}
+          >
+          Yes
+        </label>
+        <label>
+          <input
+            type="radio" name="prior_scholarship_exclusion" value="false"
+            {% if profile.prior_scholarship_exclusion is false %}checked{% endif %}
+          >
+          No
+        </label>
+        <label>
+          <input
+            type="radio" name="prior_scholarship_exclusion" value=""
+            {% if profile.prior_scholarship_exclusion is none %}checked{% endif %}
+          >
+          Unknown
+        </label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="return_obligation">Return obligation</label>
+      <input
+        type="text" id="return_obligation" name="return_obligation"
+        value="{{ profile.return_obligation }}"
+      >
+    </div>
+
+    <div class="form-group">
+      <label for="funding_component">Funding component</label>
+      <input
+        type="text" id="funding_component" name="funding_component"
+        value="{{ profile.funding_component }}"
+      >
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Profile</button>
+  </form>
+</div>
+{% endblock %}
