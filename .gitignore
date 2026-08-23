@@ -17,3 +17,6 @@ seeds.yaml
 # Scraped page text and measured recall output -- regenerable, and third-party content.
 documents/
 data/gold_set_recall.json
+
+# Local git worktrees used for isolated subagent-driven-development work.
+.worktrees/
