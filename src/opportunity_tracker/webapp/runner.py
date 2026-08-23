@@ -93,9 +93,10 @@ def _row_to_filter(row: sqlite3.Row) -> Filter:
 
 
 def _run_pipeline(filter_id: int) -> None:
-    conn = db.get_connection(config.DB_PATH)
-    db.init_db(conn)
+    conn = None
     try:
+        conn = db.get_connection(config.DB_PATH)
+        db.init_db(conn)
         api_key = config.get_anthropic_api_key()
 
         profile_module.sync_profile(config.PROFILE_PATH, conn)
@@ -128,7 +129,8 @@ def _run_pipeline(filter_id: int) -> None:
         RUN_STATE.finished_at = datetime.now(timezone.utc).isoformat()
     finally:
         RUN_STATE.active = False
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 def _run_discovery_with_polling(filter_obj: Filter, conn: sqlite3.Connection, api_key: str) -> None:

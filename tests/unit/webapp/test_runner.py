@@ -65,3 +65,23 @@ def test_run_pipeline_reaches_done_with_mocked_network(seeded_filter_id, monkeyp
     assert runner.RUN_STATE.phase == "done", runner.RUN_STATE.error
     assert runner.RUN_STATE.active is False
     assert runner.RUN_STATE.finished_at is not None
+
+
+def test_run_pipeline_handles_db_connection_failure(seeded_filter_id, monkeypatch):
+    """Test that RUN_STATE is correctly reset even if db.get_connection raises."""
+    def failing_get_connection(db_path):
+        raise OSError("Simulated disk full / permission error")
+
+    monkeypatch.setattr(db, "get_connection", failing_get_connection)
+
+    runner.start_run(seeded_filter_id)
+
+    deadline = time.time() + 10
+    while runner.RUN_STATE.active and time.time() < deadline:
+        time.sleep(0.1)
+
+    assert runner.RUN_STATE.active is False
+    assert runner.RUN_STATE.phase == "failed"
+    assert runner.RUN_STATE.error is not None
+    assert "Simulated disk full" in runner.RUN_STATE.error
+    assert runner.RUN_STATE.finished_at is not None
