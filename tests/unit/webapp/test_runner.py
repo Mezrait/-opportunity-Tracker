@@ -67,6 +67,121 @@ def test_run_pipeline_reaches_done_with_mocked_network(seeded_filter_id, monkeyp
     assert runner.RUN_STATE.finished_at is not None
 
 
+def test_ensure_institution_directory_loaded_populates_an_empty_table(tmp_path, monkeypatch):
+    fixture_path = tmp_path / "tiny_directory.json"
+    fixture_path.write_text(
+        json.dumps([
+            {
+                "name": "Testland Institute of Technology",
+                "country": "Testland",
+                "alpha_two_code": "TL",
+                "domains": ["testland-tech.example"],
+            }
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "UNIVERSITY_DIRECTORY_PATH", str(fixture_path))
+
+    conn = db.get_connection(config.DB_PATH)
+    db.init_db(conn)
+    assert conn.execute("SELECT COUNT(*) AS n FROM institution").fetchone()["n"] == 0
+
+    runner._ensure_institution_directory_loaded(conn)
+
+    rows = conn.execute("SELECT domain, country FROM institution").fetchall()
+    assert [dict(r) for r in rows] == [
+        {"domain": "testland-tech.example", "country": "Testland"}
+    ]
+    conn.close()
+
+
+def test_ensure_institution_directory_loaded_skips_an_already_populated_table(
+    tmp_path, monkeypatch
+):
+    # Point at a fixture that would insert a DIFFERENT institution than the one
+    # already seeded -- if the guard's COUNT(*) check were missing or broken, this
+    # institution would show up too.
+    fixture_path = tmp_path / "should_not_load.json"
+    fixture_path.write_text(
+        json.dumps([
+            {
+                "name": "Should Not Be Loaded University",
+                "country": "Nowhere",
+                "alpha_two_code": "XX",
+                "domains": ["should-not-load.example"],
+            }
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "UNIVERSITY_DIRECTORY_PATH", str(fixture_path))
+
+    conn = db.get_connection(config.DB_PATH)
+    db.init_db(conn)
+    conn.execute(
+        "INSERT INTO institution (name, country, country_code, domain, source, "
+        "directory_version, added_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("Pre-seeded University", "Testland", "TL", "pre-seeded.example",
+         "hipo_directory", "test", "2026-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+
+    runner._ensure_institution_directory_loaded(conn)
+
+    domains = {r["domain"] for r in conn.execute("SELECT domain FROM institution")}
+    assert domains == {"pre-seeded.example"}
+    conn.close()
+
+
+def test_run_pipeline_on_a_fresh_db_finds_a_candidate_at_a_real_institution(
+    seeded_filter_id, monkeypatch
+):
+    # Reproduces the exact bug a real user hit: a brand-new database (no institution
+    # rows) running a search that should match a real institution. Before the fix,
+    # this silently completed with 0 institutions considered and 0 candidates found,
+    # with nothing telling the user why.
+    from opportunity_tracker.discovery import websearch as websearch_module
+
+    fixture_path = Path(config.DB_PATH).parent / "one_real_institution.json"
+    fixture_path.write_text(
+        json.dumps([
+            {
+                "name": "Testland Institute of Technology",
+                "country": "Testland",
+                "alpha_two_code": "TL",
+                "domains": ["testland-tech.example"],
+            }
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "UNIVERSITY_DIRECTORY_PATH", str(fixture_path))
+
+    conn = db.get_connection(config.DB_PATH)
+    db.init_db(conn)
+    assert conn.execute("SELECT COUNT(*) AS n FROM institution").fetchone()["n"] == 0
+    conn.close()
+
+    def fake_search_institution(institution, filter_obj, api_key, max_uses=3):
+        return [{"url": "https://testland-tech.example/scholarships/phd", "title": "PhD Scholarship"}]
+
+    monkeypatch.setattr(websearch_module, "search_institution", fake_search_institution)
+
+    runner.start_run(seeded_filter_id)
+
+    deadline = time.time() + 10
+    while runner.RUN_STATE.phase not in ("done", "failed") and time.time() < deadline:
+        time.sleep(0.1)
+
+    assert runner.RUN_STATE.phase == "done", runner.RUN_STATE.error
+    assert runner.RUN_STATE.candidates_found >= 1
+
+    conn = db.get_connection(config.DB_PATH)
+    db.init_db(conn)
+    assert conn.execute("SELECT COUNT(*) AS n FROM institution").fetchone()["n"] == 1
+    candidate_count = conn.execute("SELECT COUNT(*) AS n FROM candidate").fetchone()["n"]
+    assert candidate_count >= 1
+    conn.close()
+
+
 def test_run_pipeline_handles_db_connection_failure(seeded_filter_id, monkeypatch):
     """Test that RUN_STATE is correctly reset even if db.get_connection raises."""
     def failing_get_connection(db_path):

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from opportunity_tracker import config, db, profile as profile_module
+from opportunity_tracker import config, db, directory, profile as profile_module
 from opportunity_tracker.discovery import run as discovery_run
 from opportunity_tracker.evaluator import run as evaluator_run
 from opportunity_tracker.extractor import run as extractor_run
@@ -92,12 +92,32 @@ def _row_to_filter(row: sqlite3.Row) -> Filter:
     )
 
 
+def _ensure_institution_directory_loaded(conn: sqlite3.Connection) -> None:
+    # A fresh DB (e.g. a first-ever `optrack serve` run) has no `institution` rows --
+    # the CLI required a separate, manual `optrack load-directory --version ...`
+    # step before `discover` could find anything. The web UI has no equivalent
+    # command anywhere in its six screens, so without this a first-time user's
+    # search silently completes with 0 institutions considered and 0 candidates
+    # found, with nothing telling them why. Loading is idempotent (keyed by
+    # domain, existing rows are never touched -- see directory.py's own
+    # docstring), so this only does real work once per fresh database.
+    count = conn.execute("SELECT COUNT(*) AS n FROM institution").fetchone()["n"]
+    if count > 0:
+        return
+    inserted = directory.load_institution_directory(
+        config.UNIVERSITY_DIRECTORY_PATH, conn, directory_version="web-ui-auto"
+    )
+    RUN_STATE.add_log(f"Loaded institution directory: {inserted} institution(s).")
+
+
 def _run_pipeline(filter_id: int) -> None:
     conn = None
     try:
         conn = db.get_connection(config.DB_PATH)
         db.init_db(conn)
         api_key = config.get_anthropic_api_key()
+
+        _ensure_institution_directory_loaded(conn)
 
         profile_module.sync_profile(config.PROFILE_PATH, conn)
 
