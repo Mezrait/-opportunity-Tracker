@@ -29,7 +29,7 @@ The original file is 184,974 bytes and the encrypted files are 184,976 bytes. Th
 
 I installed eog (Eye of GNOME) and opened the original and both encrypted pictures.
 
-[IMG 20.png] Figure 21: The original picture
+[IMG 20c.png] Figure 21: The original picture
 [IMG 21.png] Figure 22: The picture encrypted with ECB mode
 [IMG 22.png] Figure 23: The picture encrypted with CBC mode
 

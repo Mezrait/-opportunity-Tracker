@@ -38,7 +38,7 @@ To encrypt I used tr again, mapping the normal alphabet to my key:
 
 Only letters are changed, spaces and newlines stay the same. I saved the output as my_ciphertext.txt so I would not overwrite the ciphertext.txt that is given for Task 2.
 
-[IMG 4.png - encryption part] Figure 4: The ciphertext I created (my_ciphertext.txt)
+[IMG 4a.png] Figure 4: The ciphertext I created (my_ciphertext.txt)
 
 For example the first words "there are two main types" became "ewdnd and ejv zagx ercdu". In "there" → "ewdnd" the letter e appears twice and both times it became d, so repeated letters in the plaintext stay repeated in the ciphertext at the same positions. This is exactly the weakness that frequency analysis uses in Task 2.
 
@@ -46,7 +46,7 @@ For example the first words "there are two main types" became "ewdnd and ejv zag
 
 To make sure the encryption was correct I decrypted the file by swapping the two sets in tr (key → alphabet) and compared the result with plaintext.txt using diff. diff printed nothing and the echo printed MATCH, so the decrypted file is identical to the plaintext.
 
-[IMG 4.png - decryption part] Figure 5: Decryption and verification with diff
+[IMG 4b.png] Figure 5: Decryption and verification with diff
 
 ## Observations
 

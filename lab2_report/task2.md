@@ -9,7 +9,7 @@ To keep track of my progress I wrote the plaintext letters in CAPITALS and left 
 First I ran the provided freq.py program. It prints the top 20 single letters (1-grams), bigrams (2-grams) and trigrams (3-grams) in the ciphertext. It ignores groups that contain spaces.
 
 [IMG 6.png] Figure 6: freq.py output – single letter and bigram frequencies
-[IMG 7.png] Figure 7: freq.py output – bigram and trigram frequencies
+[IMG 7c.png] Figure 7: freq.py output – trigram frequencies
 
 The most important results were:
 
