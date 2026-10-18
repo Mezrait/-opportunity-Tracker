@@ -117,9 +117,8 @@ def front_page(doc):
     else:
         for _ in range(3):
             doc.add_paragraph()
-    lines = [
-        (UNIVERSITY, 18, True),
-        ("", 11, False),
+    lines = [] if logo.exists() else [(UNIVERSITY, 18, True), ("", 11, False)]
+    lines += [
         ("ITE408: Information Security", 20, True),
         ("Fall 2026-27", 13, False),
         ("", 11, False),
@@ -133,7 +132,7 @@ def front_page(doc):
         r = p.add_run(text)
         r.font.size = Pt(size)
         r.bold = bold
-    for _ in range(4):
+    for _ in range(2 if logo.exists() else 4):
         doc.add_paragraph()
     info = [
         ("Student Name", STUDENT_NAME),
