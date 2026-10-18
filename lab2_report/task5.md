@@ -41,9 +41,11 @@ Instead, I installed GHex, which is another graphical hex editor, and opened ecb
 
 [IMG 26.png] Figure 27: ecb.bin in GHex, the byte at offset 0x36 is B7
 
-When I tried to edit and save the file in GHex, the change was not written to the file (I checked with xxd and the byte was still b7). The first decryption of all four files gave 0 different bytes, which confirmed that the files were not changed yet. Because of this I flipped the bit with a short Python command instead. It reads the file, XORs byte 54 with 1 (this flips only the lowest bit), and writes it back. It does exactly the same thing as changing B7 to B6 in a hex editor.
+When I tried to edit and save ecb.bin in GHex, the change was not written to the file. When I decrypted all four files at that point, every mode gave 0 different bytes, which showed that the files were still not corrupted (Figure 28). Because of this I flipped the bit with a short Python command instead. It reads the file, XORs byte 54 with 1 (this flips only the lowest bit), and writes it back. It does exactly the same thing as changing B7 to B6 in a hex editor.
 
-[IMG t5_flip.png] Figure 28: Checking the corrupted byte (offset 0x36) and the file sizes of all four files
+[IMG 27_first_run.png] Figure 28: First decryption attempt – 0 bytes differ because the files were not corrupted yet
+
+[IMG t5_flip.png] Figure 29: Checking the corrupted byte (offset 0x36) and the file sizes of all four files
 
 | File | Byte 55 before | Byte 55 after |
 |---|---|---|
@@ -56,10 +58,11 @@ I checked with xxd that only the expected byte changed and with ls -l that the f
 
 ## Step 4 – Decrypting the corrupted files
 
-I decrypted each file with the correct key and IV, and used cmp -l to count how many bytes are different from the original plain.txt. I also printed the first lines with cat -v so the non-printable characters can be seen.
+After all four files were corrupted, I checked the byte at offset 0x36 again and decrypted each file with the correct key and IV. Then I used cmp -l to count how many bytes are different from the original plain.txt, and printed the first lines with cat -v so the non-printable characters can be seen.
 
-[IMG 30.png] Figure 29: ECB – bit flip and decryption result
-[IMG 28.png] Figure 30: CBC, CFB and OFB decryption results
+[IMG t5_decrypt.png] Figure 30: Checking the corrupted bytes and decrypting the four files
+
+[IMG t5_results.png] Figure 31: Decryption results for ECB, CBC, CFB and OFB
 
 ## Results
 
