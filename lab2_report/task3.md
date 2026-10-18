@@ -53,7 +53,7 @@ With the legacy provider, encryption and decryption worked and the decrypted fil
 
 ## Comparing the file sizes
 
-[IMG 18.png] Figure 18: OpenSSL version and file sizes
+[IMG t3_sizes.png] Figure 18: OpenSSL version and file sizes
 
 | File | Size (bytes) | Reason |
 |---|---|---|
