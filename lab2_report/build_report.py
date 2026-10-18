@@ -17,8 +17,8 @@ IMG = HERE / "img"
 # Front page details – edit these before building
 STUDENT_NAME = "Mezrait Menber"
 STUDENT_ID = "1093911"
-SECTION = "[Section]"
-INSTRUCTOR = "[Instructor Name]"
+SECTION = "103"
+INSTRUCTOR = "Dr. Abid Mehmmood"
 UNIVERSITY = "Abu Dhabi University"
 VIDEO_LINK = "[Paste OneDrive video link here]"
 
