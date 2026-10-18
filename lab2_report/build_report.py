@@ -15,11 +15,11 @@ HERE = Path(__file__).parent
 IMG = HERE / "img"
 
 # Front page details – edit these before building
-STUDENT_NAME = "[Your Full Name]"
+STUDENT_NAME = "Mezrait Menber"
 STUDENT_ID = "1093911"
 SECTION = "[Section]"
 INSTRUCTOR = "[Instructor Name]"
-UNIVERSITY = "[University Name]"
+UNIVERSITY = "Abu Dhabi University"
 VIDEO_LINK = "[Paste OneDrive video link here]"
 
 FONT = "Calibri"
@@ -109,8 +109,14 @@ def setup_styles(doc):
 
 
 def front_page(doc):
-    for _ in range(3):
-        doc.add_paragraph()
+    logo = IMG / "adu_logo.png"
+    if logo.exists():
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.add_run().add_picture(str(logo), width=Cm(6))
+    else:
+        for _ in range(3):
+            doc.add_paragraph()
     lines = [
         (UNIVERSITY, 18, True),
         ("", 11, False),
