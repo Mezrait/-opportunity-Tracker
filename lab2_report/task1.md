@@ -28,7 +28,7 @@ Then I simplified the text with two tr commands:
 
 The first command converts all capital letters to small letters. The second command uses -c (complement) and -d (delete) so it deletes every character that is NOT a lowercase letter, a newline or a space. So all punctuation and numbers are removed but the spaces stay, which keeps the word boundaries.
 
-[IMG preprocessing screenshot] Figure 3: Preprocessing commands and plaintext.txt
+[IMG 5.png] Figure 3: Preprocessing commands and plaintext.txt
 
 ## Step 3 – Encryption with tr
 
