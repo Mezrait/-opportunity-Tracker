@@ -43,7 +43,7 @@ Instead, I installed GHex, which is another graphical hex editor, and opened ecb
 
 When I tried to edit and save the file in GHex, the change was not written to the file (I checked with xxd and the byte was still b7). The first decryption of all four files gave 0 different bytes, which confirmed that the files were not changed yet. Because of this I flipped the bit with a short Python command instead. It reads the file, XORs byte 54 with 1 (this flips only the lowest bit), and writes it back. It does exactly the same thing as changing B7 to B6 in a hex editor.
 
-[IMG t5_flip.png] Figure 28: Flipping one bit in cbc.bin, cfb.bin and ofb.bin and checking the result
+[IMG t5_flip.png] Figure 28: Checking the corrupted byte (offset 0x36) and the file sizes of all four files
 
 | File | Byte 55 before | Byte 55 after |
 |---|---|---|
