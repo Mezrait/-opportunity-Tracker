@@ -65,13 +65,15 @@ I switched to sam with su - sam, went to /home and listed the directories. Here 
 
 [IMG c42_sam.png] Figure 9: As sam – all home directories are 750 and sam cannot enter danny's folder
 
-This happens because newer Ubuntu versions create home directories with mode 0750 (the HOME_MODE setting in /etc/login.defs) instead of 0755 [3]. In my opinion this is a good change. With 755, any user on the machine can browse other users' files by default, and most people never check this. With 750 the home directory is private unless the owner decides to share it, which follows the principle of least privilege.
+This happens because newer Ubuntu versions create home directories with mode 0750 instead of 0755. I checked the setting on my system: HOME_MODE in /etc/login.defs is 0750 [3].
+
+[IMG a57.png] Figure 10: HOME_MODE is 0750 in /etc/login.defs In my opinion this is a good change. With 755, any user on the machine can browse other users' files by default, and most people never check this. With 750 the home directory is private unless the owner decides to share it, which follows the principle of least privilege.
 
 ### Recreating the lab's starting state
 
 To be able to follow the rest of the lab, as root I set danny's home directory back to 755. Then sam could enter the directory (others have x), but touch new.txt was denied because others have no w.
 
-[IMG a44.png] Figure 10: After chmod 755, sam can enter danny's folder but cannot create a file
+[IMG a44.png] Figure 11: After chmod 755, sam can enter danny's folder but cannot create a file
 
 For a directory the three permissions mean something different than for a file:
 
@@ -83,15 +85,15 @@ For a directory the three permissions mean something different than for a file:
 
 The lab gets root through a normal admin account and sudo, so I did the same: from sam I used su - hamerhadas (my own account, which asked for its password) and then sudo -i. In my case sudo -i did not ask for a password again.
 
-[IMG a45.png] Figure 11: From sam to my admin account and then to root
+[IMG a45.png] Figure 12: From sam to my admin account and then to root
 
 As root I removed the execute permission for others with symbolic mode: chmod o-x danny. The directory changed from drwxr-xr-x to drwxr-xr--.
 
-[IMG a46.png] Figure 12: chmod o-x on danny's home directory
+[IMG a46.png] Figure 13: chmod o-x on danny's home directory
 
 Then I went back to sam (exit twice) and tried again. sam was denied, even though others still have r. Without x a user cannot enter the directory at all.
 
-[IMG a47.png] Figure 13: sam cannot enter danny's folder after o-x
+[IMG a47.png] Figure 14: sam cannot enter danny's folder after o-x
 
 In symbolic mode the format is who (u, g, o, a), operator (+ adds, - removes, = sets exactly) and permissions (r, w, x). For example chmod g-w file removes write from the group and chmod a=r file makes the file read-only for everyone.
 
@@ -107,13 +109,13 @@ I switched to danny with su - danny (password dannyPass). As the owner, danny ca
 | 0 | group (danny) | 000 | --- |
 | 5 | others | 101 | r-x |
 
-[IMG a48.png] Figure 14: As danny – chmod 705 and creating test.txt
+[IMG a48.png] Figure 15: As danny – chmod 705 and creating test.txt
 
 The directory changed from drwxr-xr-- to drwx---r-x. Then danny created test.txt. The new file got -rw-rw-r-- (664) without any chmod. This comes from the default umask 002 for normal users: new files start from 666 and the umask removes write from others.
 
 Then I went back to sam:
 
-[IMG a49.png] Figure 15: As sam – reading danny's folder works, creating a file is denied
+[IMG a49.png] Figure 16: As sam – reading danny's folder works, creating a file is denied
 
 sam could enter the directory and list test.txt (others have r-x), but touch sam.txt was denied (others have no w). One thing I found interesting: sam and danny are both in the DEVELOPERS group, but this does not help sam here. The group of danny's home directory is danny, not DEVELOPERS, so for this directory sam is in "others". Linux checks the categories in order (owner, then group, then others) and uses only the first one that matches.
 
@@ -125,18 +127,18 @@ For this self-learning part I made a test directory /srv/lab3 as root and ran th
 
 I wrote a small C program that prints the real UID (who started the program) and the effective UID (whose permissions the program uses). I compiled it with gcc and made danny the owner.
 
-[IMG a50.png] Figure 16: The C program, compiling it, and making danny the owner
+[IMG a50.png] Figure 17: The C program, compiling it, and making danny the owner
 
 Then sam ran the program before and after setting SUID:
 
-[IMG a56.png] Figure 17: Without SUID the program runs as sam, with SUID it runs as danny
+[IMG a56.png] Figure 18: Without SUID the program runs as sam, with SUID it runs as danny
 
 - Without SUID (-rwxr-xr-x): real UID 1006 (sam) and effective UID 1006 (sam). The program runs with the rights of the user who started it, which is the normal case.
 - After chmod u+s (-rwsr-xr-x, the x of the owner becomes s): real UID still 1006 (sam), but effective UID 1007 (danny). So sam is running code with danny's permissions.
 
 A real example is /usr/bin/passwd, which is SUID root:
 
-[IMG c54_passwd.png] Figure 18: passwd has the SUID bit and is owned by root
+[IMG c54_passwd.png] Figure 19: passwd has the SUID bit and is owned by root
 
 A normal user must be able to change their own password, but the hash is in /etc/shadow, which only root can write. SUID lets passwd run as root for this one job. In my opinion SUID is the most dangerous of the three bits: if a SUID-root program has a bug or lets the user run other commands, any user can become root. That is why administrators should keep the number of SUID files small and check them regularly, for example with find / -perm -4000.
 
@@ -144,9 +146,9 @@ A normal user must be able to change their own password, but the hash is in /etc
 
 I created a shared directory with group DEVELOPERS and mode 775. sam created before.txt, then I set SGID with chmod g+s and sam created after.txt.
 
-[IMG a51.png] Figure 19: SGID test – group of files created before and after g+s
+[IMG a51.png] Figure 20: SGID test – group of files created before and after g+s
 
-[IMG a55.png] Figure 20: The shared directory with the SGID bit (drwxrwsr-x)
+[IMG a55.png] Figure 21: The shared directory with the SGID bit (drwxrwsr-x)
 
 before.txt got the group sam (sam's primary group, the normal behaviour), but after.txt got the group DEVELOPERS, the group of the directory. So with SGID all new files in a shared folder belong to the team's group automatically, and the other members can work with them without someone having to run chgrp each time.
 
@@ -154,7 +156,7 @@ before.txt got the group sam (sam's primary group, the normal behaviour), but af
 
 I created /tmp/teststicky with mode 777 (everyone can write) and tested if danny can delete a file that belongs to sam, first without and then with the sticky bit.
 
-[IMG a53.png] Figure 21: Sticky bit test
+[IMG a53.png] Figure 22: Sticky bit test
 
 - Without the sticky bit (drwxrwxrwx): danny deleted sam1.txt without any problem, even though the file belongs to sam. This is because deleting a file is controlled by the w permission on the directory, not by the permissions of the file.
 - With chmod +t (drwxrwxrwt, the x of others becomes t): danny got "Operation not permitted" on sam2.txt, but sam could delete his own file. With the sticky bit only the owner of the file, the owner of the directory or root can delete or rename it.
