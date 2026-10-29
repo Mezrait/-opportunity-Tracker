@@ -9,9 +9,13 @@ I did this lab on Ubuntu 24.04.4 LTS running in WSL 2 on my Windows 11 laptop, n
 - WSL has no graphical desktop, so I could not use "Logout → Switch User" like the lab sheet describes. Instead I switched users in the terminal with su - username, which starts a full login shell for that user. This is the command-line way of doing the same thing.
 - The lab expects a VM that already has users like Alice, Bob, Eve and Eric. My system did not have them, but it had three accounts that already existed before this lab (fakeuser, fakeuser1 and malicious_actor, with home directories dated 23 September). So my user and group IDs are different from the ones in the lab sheet.
 
-First I became root with sudo su. Since every screenshot must show my student ID, and in this lab it is also important to see which user is running each command, I changed the prompt to show the date, time, my ID and the current user and folder. I added the same line to /etc/skel/.bashrc before creating the new users, because every new user gets a copy of this file in their home directory, so sam and danny would also get the prompt automatically.
+First I became root with sudo su (the screenshot below was taken later in the session, so the working directory is different, but the step is the same).
 
-[IMG a35.png] Figure 1: Setting the prompt for root, for new users (/etc/skel) and for my own account
+[IMG c58_sudo.png] Figure 1: Becoming root with sudo su
+
+Since every screenshot must show my student ID, and in this lab it is also important to see which user is running each command, I changed the prompt to show the date, time, my ID and the current user and folder. I added the same line to /etc/skel/.bashrc before creating the new users, because every new user gets a copy of this file in their home directory, so sam and danny would also get the prompt automatically.
+
+[IMG a35.png] Figure 2: Setting the prompt for root, for new users (/etc/skel) and for my own account
 
 My first version used double quotes, and bash turned the \$ into a normal $ when it read the file. Because of this the root prompt ended with $ instead of #, which is misleading in a lab about privileges (# means root). I fixed it by replacing the last line of all five .bashrc files with a single-quoted version:
 
@@ -19,39 +23,43 @@ My first version used double quotes, and bash turned the \$ into a normal $ when
 
 The screenshot shows the old line that was removed from each file, and after reloading root's .bashrc the prompt ends with #. Normal users still show $.
 
-[IMG c43_ps1.png] Figure 2: Fixing the prompt – after the fix the root prompt ends with #
+[IMG c43_ps1.png] Figure 3: Fixing the prompt – after the fix the root prompt ends with #
 
 ## Part 1 – Adding a new group
 
 I created the group with groupadd DEVELOPERS.
 
-[IMG c36_groupadd.png] Figure 3: Creating the DEVELOPERS group
+[IMG c36_groupadd.png] Figure 4: Creating the DEVELOPERS group
 
 Groups are stored in /etc/group, one per line, in the format name:password:GID:members. The x means the group password (if any) is kept in /etc/gshadow.
 
-[IMG c43_group.png] Figure 4: The DEVELOPERS group at the end of /etc/group
+[IMG c43_group.png] Figure 5: The DEVELOPERS group at the end of /etc/group
 
 DEVELOPERS got GID 1005 (in the lab sheet it was 1005 too, but only by chance, since the other groups on my system are different). This screenshot was taken after Part 2, so it already shows sam and danny as members.
 
 ## Part 2 – Adding users to the group
 
-I created sam with adduser sam. adduser is the interactive Debian/Ubuntu tool: it creates the user and a private group with the same name, makes the home directory, copies the files from /etc/skel, asks for the password (samPass) and then asks for the GECOS information. For the full name I entered my own text instead of "Sam", so it appears in /etc/passwd later. At the end adduser also added sam to the extra group users.
+I created sam with adduser sam. adduser is the interactive Debian/Ubuntu tool: it creates the user and a private group with the same name, makes the home directory, copies the files from /etc/skel, asks for the password (samPass) and then asks for the GECOS information. For the full name I first entered my own text instead of "Sam", and later corrected it with chfn (Figure 9). At the end adduser also added sam to the extra group users.
 
-[IMG a37.png] Figure 5: Creating the user sam with adduser
+[IMG a37.png] Figure 6: Creating the user sam with adduser
 
 Then I added sam to DEVELOPERS with usermod -G DEVELOPERS sam and did the same steps for danny (password dannyPass).
 
-[IMG a38.png] Figure 6: Adding sam to DEVELOPERS and creating danny
+[IMG a38.png] Figure 7: Adding sam to DEVELOPERS and creating danny
 
 ## Part 2 – Verifying users, groups and passwords
 
 /etc/passwd stores one line per account: username:x:UID:GID:GECOS:home:shell. sam got UID 1006 and danny 1007, each with a private group of the same number, a home directory in /home and /bin/bash as the shell. The x in the second field means the password hash is not stored here. This is important because /etc/passwd must be readable by everyone (programs use it to convert UIDs to names), so keeping the hash in it would let any user copy it and try to crack it offline.
 
-[IMG c39_passwd.png] Figure 7: The new users at the end of /etc/passwd
+[IMG c39_passwd.png] Figure 8: The new users at the end of /etc/passwd
+
+Because the lab asks for the full names Sam and Danny, I corrected the GECOS field with chfn and checked /etc/passwd again:
+
+[IMG c58_chfn.png] Figure 9: Setting the full names to Sam and Danny with chfn
 
 The hashes are kept in /etc/shadow, which only root can read.
 
-[IMG a40.png] Figure 8: The entries for sam and danny in /etc/shadow
+[IMG c58_shadow.png] Figure 10: The entries for sam and danny in /etc/shadow
 
 The fields are username:hash:last change:min:max:warn:… . Two things are different from the lab sheet:
 
@@ -61,9 +69,9 @@ The fields are username:hash:last change:min:max:warn:… . Two things are diffe
 
 Finally I checked the group membership:
 
-[IMG a41.png] Figure 9: Group membership of sam and danny
+[IMG a41.png] Figure 11: Group membership of sam and danny
 
-Both users are in DEVELOPERS. But I noticed that the group users is missing from the output of id, even though adduser added both users to it (Figure 5). The reason is that usermod -G sets the full list of supplementary groups, so it replaced users with DEVELOPERS. To add a group without removing the others, the correct command is usermod -aG DEVELOPERS sam (-a = append) [2]. In this lab nothing breaks, but on a real system this mistake could silently remove a user from an important group like sudo.
+Both users are in DEVELOPERS. But I noticed that the group users is missing from the output of id, even though adduser added both users to it (Figure 6). The reason is that usermod -G sets the full list of supplementary groups, so it replaced users with DEVELOPERS. To add a group without removing the others, the correct command is usermod -aG DEVELOPERS sam (-a = append) [2]. In this lab nothing breaks, but on a real system this mistake could silently remove a user from an important group like sudo.
 
 ## Part 3 – Switching users and symbolic permissions
 
@@ -71,11 +79,11 @@ Both users are in DEVELOPERS. But I noticed that the group users is missing from
 
 I switched to sam with su - sam, went to /home and listed the directories. Here my result was different from the lab sheet. In the lab every home directory is drwxr-xr-x (755), but on my system all of them, including my own, are drwxr-x--- (750). So when sam tried to enter danny's directory, he was already denied, before anyone changed any permission.
 
-[IMG c42_sam.png] Figure 10: As sam – all home directories are 750 and sam cannot enter danny's folder
+[IMG c42_sam.png] Figure 12: As sam – all home directories are 750 and sam cannot enter danny's folder
 
 This happens because newer Ubuntu versions create home directories with mode 0750 instead of 0755. I checked the setting on my system: HOME_MODE in /etc/login.defs is 0750 [3].
 
-[IMG a57.png] Figure 11: HOME_MODE is 0750 in /etc/login.defs
+[IMG a57.png] Figure 13: HOME_MODE is 0750 in /etc/login.defs
 
 In my opinion this is a good change. With 755, any user on the machine can browse other users' files by default, and most people never check this. With 750 the home directory is private unless the owner decides to share it, which follows the principle of least privilege.
 
@@ -83,7 +91,7 @@ In my opinion this is a good change. With 755, any user on the machine can brows
 
 To be able to follow the rest of the lab, as root I set danny's home directory back to 755. Then sam could enter the directory (others have x), but touch new.txt was denied because others have no w.
 
-[IMG a44.png] Figure 12: After chmod 755, sam can enter danny's folder but cannot create a file
+[IMG a44.png] Figure 14: After chmod 755, sam can enter danny's folder but cannot create a file
 
 For a directory the three permissions mean something different than for a file:
 
@@ -95,15 +103,15 @@ For a directory the three permissions mean something different than for a file:
 
 The lab gets root through a normal admin account and sudo, so I did the same: from sam I used su - hamerhadas (my own account, which asked for its password) and then sudo -i. In my case sudo -i did not ask for a password again.
 
-[IMG a45.png] Figure 13: From sam to my admin account and then to root
+[IMG a45.png] Figure 15: From sam to my admin account and then to root
 
 As root I removed the execute permission for others with symbolic mode: chmod o-x danny. The directory changed from drwxr-xr-x to drwxr-xr--.
 
-[IMG a46.png] Figure 14: chmod o-x on danny's home directory
+[IMG a46.png] Figure 16: chmod o-x on danny's home directory
 
 Then I went back to sam (exit twice) and tried again. sam was denied, even though others still have r. Without x a user cannot enter the directory at all.
 
-[IMG a47.png] Figure 15: sam cannot enter danny's folder after o-x
+[IMG a47.png] Figure 17: sam cannot enter danny's folder after o-x
 
 In symbolic mode the format is who (u, g, o, a), operator (+ adds, - removes, = sets exactly) and permissions (r, w, x). For example chmod g-w file removes write from the group and chmod a=r file makes the file read-only for everyone.
 
@@ -119,13 +127,15 @@ I switched to danny with su - danny (password dannyPass). As the owner, danny ca
 | 0 | group (danny) | 000 | --- |
 | 5 | others | 101 | r-x |
 
-[IMG a48.png] Figure 16: As danny – chmod 705 and creating test.txt
+[IMG a48.png] Figure 18: As danny – chmod 705 and creating test.txt
 
-The directory changed from drwxr-xr-- to drwx---r-x. Then danny created test.txt. The new file got -rw-rw-r-- (664) without any chmod. This comes from the default umask 002 for normal users: new files start from 666 and the umask removes write from others.
+The directory changed from drwxr-xr-- to drwx---r-x. Then danny created test.txt. The new file got -rw-rw-r-- (664) without any chmod. This comes from the default umask 002 for normal users: new files start from 666 and the umask removes write from others. I confirmed the umask by running it as danny:
+
+[IMG c58_umask.png] Figure 19: danny's umask is 0002, and test.txt is -rw-rw-r--
 
 Then I went back to sam:
 
-[IMG a49.png] Figure 17: As sam – reading danny's folder works, creating a file is denied
+[IMG a49.png] Figure 20: As sam – reading danny's folder works, creating a file is denied
 
 sam could enter the directory and list test.txt (others have r-x), but touch sam.txt was denied (others have no w). One thing I found interesting: sam and danny are both in the DEVELOPERS group, but this does not help sam here. The group of danny's home directory is danny, not DEVELOPERS, so for this directory sam is in "others". Linux checks the categories in order (owner, then group, then others) and uses only the first one that matches.
 
@@ -137,18 +147,18 @@ For this self-learning part I made a test directory /srv/lab3 as root and ran th
 
 I wrote a small C program that prints the real UID (who started the program) and the effective UID (whose permissions the program uses). I compiled it with gcc and made danny the owner.
 
-[IMG a50.png] Figure 18: The C program, compiling it, and making danny the owner
+[IMG a50.png] Figure 21: The C program, compiling it, and making danny the owner
 
 Then sam ran the program before and after setting SUID:
 
-[IMG a56.png] Figure 19: Without SUID the program runs as sam, with SUID it runs as danny
+[IMG a56.png] Figure 22: Without SUID the program runs as sam, with SUID it runs as danny
 
 - Without SUID (-rwxr-xr-x): real UID 1006 (sam) and effective UID 1006 (sam). The program runs with the rights of the user who started it, which is the normal case.
 - After chmod u+s (-rwsr-xr-x, the x of the owner becomes s): real UID still 1006 (sam), but effective UID 1007 (danny). So sam is running code with danny's permissions.
 
 A real example is /usr/bin/passwd, which is SUID root:
 
-[IMG c54_passwd.png] Figure 20: passwd has the SUID bit and is owned by root
+[IMG c54_passwd.png] Figure 23: passwd has the SUID bit and is owned by root
 
 A normal user must be able to change their own password, but the hash is in /etc/shadow, which only root can write. SUID lets passwd run as root for this one job. In my opinion SUID is the most dangerous of the three bits: if a SUID-root program has a bug that lets the user control what it does (for example run another command or write to a file they choose), that user can become root. That is why administrators should keep the number of SUID files small and check them regularly, for example with find / -perm -4000.
 
@@ -156,9 +166,9 @@ A normal user must be able to change their own password, but the hash is in /etc
 
 I created a shared directory with group DEVELOPERS and mode 775. sam created before.txt, then I set SGID with chmod g+s and sam created after.txt.
 
-[IMG a51.png] Figure 21: SGID test – group of files created before and after g+s
+[IMG a51.png] Figure 24: SGID test – group of files created before and after g+s
 
-[IMG a55.png] Figure 22: The shared directory with the SGID bit (drwxrwsr-x)
+[IMG a55.png] Figure 25: The shared directory with the SGID bit (drwxrwsr-x)
 
 before.txt got the group sam (sam's primary group, the normal behaviour), but after.txt got the group DEVELOPERS, the group of the directory. So with SGID all new files in a shared folder belong to the team's group automatically, and the other members can work with them without someone having to run chgrp each time. SGID on an executable file works differently (the program runs with the file's group, similar to SUID), but I only tested the directory case, which is what this part asked for.
 
@@ -166,11 +176,11 @@ before.txt got the group sam (sam's primary group, the normal behaviour), but af
 
 I created /tmp/teststicky with mode 777 (everyone can write), and sam created sam1.txt in it.
 
-[IMG c52_sticky_setup.png] Figure 23: Creating the test directory with mode 777 and a file owned by sam
+[IMG c52_sticky_setup.png] Figure 26: Creating the test directory with mode 777 and a file owned by sam
 
 Then I tested if danny can delete a file that belongs to sam, first without and then with the sticky bit.
 
-[IMG a53.png] Figure 24: Sticky bit test
+[IMG a53.png] Figure 27: Sticky bit test
 
 - Without the sticky bit (drwxrwxrwx): danny deleted sam1.txt without any problem, even though the file belongs to sam. This is because deleting a file is controlled by the w permission on the directory, not by the permissions of the file.
 - With chmod +t (drwxrwxrwt, the x of others becomes t): danny got "Operation not permitted" on sam2.txt, but sam could delete his own file. According to the chmod documentation, with the sticky bit only the owner of the file, the owner of the directory or root can delete or rename it [4]. I tested the file owner (sam) and another user (danny); in my first attempt (described below) root also deleted danny.txt from the directory while the sticky bit was set.
@@ -179,7 +189,7 @@ The last command shows that /tmp itself has the sticky bit. That is why all user
 
 In my first attempt at this test I used rm without -f. Because the files are not writable by danny, rm asked "remove write-protected regular empty file?" and pressing Enter answered no, so nothing was really tested. I repeated the test with rm -f, which does not ask. The first attempt still shows one useful result: with the sticky bit set, root deleted danny.txt (a file owned by danny) without any problem.
 
-[IMG c52_first_attempt.png] Figure 25: First attempt – rm asked for confirmation, and root deleted danny's file with the sticky bit set
+[IMG c52_first_attempt.png] Figure 28: First attempt – rm asked for confirmation, and root deleted danny's file with the sticky bit set
 
 ## Part A summary
 
