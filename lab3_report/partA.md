@@ -127,7 +127,7 @@ I switched to danny with su - danny (password dannyPass). As the owner, danny ca
 | 0 | group (danny) | 000 | --- |
 | 5 | others | 101 | r-x |
 
-[IMG a48.png] Figure 18: As danny – chmod 705 and creating test.txt
+[IMG c60_705.png] Figure 18: As danny – top: before and after chmod 705 (05:41–05:42); bottom: creating test.txt in the 705 directory (earlier run at 05:39)
 
 The directory changed from drwxr-xr-- to drwx---r-x. Then danny created test.txt. The new file got -rw-rw-r-- (664) without any chmod. This comes from the default umask 002 for normal users: new files start from 666 and the umask removes write from others. I confirmed the umask by running it as danny:
 
