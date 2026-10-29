@@ -29,13 +29,17 @@ REFERENCES = [
     'Ubuntu Manpages, "usermod – modify a user account," Ubuntu 24.04 (noble). [Online]. Available: https://manpages.ubuntu.com/manpages/noble/man8/usermod.8.html. [Accessed: Oct. 29, 2026].',
     'Ubuntu Manpages, "login.defs – shadow password suite configuration," Ubuntu 24.04 (noble). [Online]. Available: https://manpages.ubuntu.com/manpages/noble/man5/login.defs.5.html. [Accessed: Oct. 29, 2026].',
     'Ubuntu Manpages, "chmod – change file mode bits," Ubuntu 24.04 (noble). [Online]. Available: https://manpages.ubuntu.com/manpages/noble/man1/chmod.1.html. [Accessed: Oct. 29, 2026].',
+    'Keycloak, "Server Administration Guide." [Online]. Available: https://www.keycloak.org/docs/latest/server_admin/. [Accessed: Oct. 29, 2026].',
+    "D. M'Raihi, " 'S. Machani, M. Pei and J. Rydell, "TOTP: Time-Based One-Time Password Algorithm," RFC 6238, IETF, May 2011.',
+    'N. Sakimura, J. Bradley and N. Agarwal, "Proof Key for Code Exchange by OAuth Public Clients," RFC 7636, IETF, Sep. 2015.',
+    'T. Lodderstedt, J. Bradley, A. Labunets and D. Fett, "Best Current Practice for OAuth 2.0 Security," RFC 9700, IETF, Jan. 2025.',
 ]
 
 # (markdown file, local citation number -> global reference number)
 SECTIONS = [
     ("intro.md", {}),
     ("partA.md", {1: 1, 2: 2, 3: 3, 4: 4}),
-    ("Part B – Getting Started with Keycloak Identity Provider", {}),
+    ("partB.md", {5: 5, 6: 6, 7: 7, 8: 8}),
     ("VIDEO", {}),
 ]
 

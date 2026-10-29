@@ -1,0 +1,167 @@
+# Part B – Getting Started with Keycloak Identity Provider
+
+Keycloak is an open-source identity and access management (IAM) server. Instead of every application storing its own users and passwords, the applications send the user to Keycloak to log in, and Keycloak gives the application a signed token that says who the user is and what they are allowed to do. It supports the standard protocols OpenID Connect, OAuth 2.0 and SAML [5]. In this part I ran Keycloak in Docker, secured the admin account with a one-time password, created my own realm, user and clients, and looked at the tokens that Keycloak issues.
+
+## Step 1 – Running Keycloak in Docker
+
+Docker Desktop was already installed on my Windows laptop, but at first the docker command did not work inside Ubuntu. I had to turn on the WSL integration for my Ubuntu distribution in the Docker Desktop settings. After that I started Keycloak as root with:
+
+    docker run --name keycloak -p 8080:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=Mezrait -e KC_BOOTSTRAP_ADMIN_PASSWORD=1093911 quay.io/keycloak/keycloak:latest start-dev
+
+- --name keycloak gives the container a fixed name, so I can stop and start the same container later without losing my configuration.
+- -p 8080:8080 publishes port 8080 of the container on port 8080 of my machine, so the browser can open http://localhost:8080.
+- The two -e variables create the first admin account: my first name as the username and my student ID as the password.
+- start-dev runs Keycloak in development mode.
+
+The image was not on my machine yet, so Docker downloaded it first. In the log I could see three useful things: the version is Keycloak 26.8.1, the server warns "Running the server in development mode. DO NOT use this configuration in production", and it says "Created temporary admin user with username Mezrait".
+
+[IMG b61.png] Figure 29: Downloading the image and starting Keycloak 26.8.1 in development mode
+
+In a second terminal I checked the running container with docker ps. It shows the container name keycloak, the image quay.io/keycloak/keycloak:latest, the status "Up" and the port mapping 0.0.0.0:8080->8080/tcp.
+
+[IMG b62.png] Figure 30: docker ps shows the Keycloak container running with port 8080 published
+
+Development mode is fine for a lab, but it is not secure for real use: it uses plain HTTP instead of HTTPS, relaxed settings, and a local H2 database inside the container (jdbc-h2 is in the list of installed features in Figure 29). If the container is deleted, everything I configure is lost. In production Keycloak should run with start, HTTPS, a real hostname and an external database.
+
+## Step 2 – Logging in to the Admin Console
+
+I opened http://localhost:8080 in the browser and logged in with the bootstrap admin account. I showed the password on the login page so the screenshot includes my student ID.
+
+[IMG b66c.png] Figure 31: Keycloak admin login with the bootstrap account
+
+After logging in, the admin console opened in the master realm.
+
+[IMG b64.png] Figure 32: The Keycloak admin console after logging in
+
+Two things I noticed:
+
+- I typed the username Mezrait, but the console shows mezrait. Keycloak stores usernames in lower case, so usernames are not case-sensitive.
+- A yellow banner says "You are logged in as a temporary admin user. To harden security, create a permanent admin account and delete the temporary one." In Keycloak 26 the bootstrap admin is meant only for the first setup. This makes sense, because the bootstrap password was passed on the command line, where it can end up in the shell history and in docker inspect.
+
+## Step 3 – Two-factor authentication (OTP) for the admin
+
+A password alone is one factor (something you know). To make the admin account stronger I added a one-time password from my phone (something you have). In Users → mezrait → Details I added Configure OTP to the Required user actions. A required action is something Keycloak forces the user to complete at the next login.
+
+[IMG b65.png] Figure 33: Adding the required action Configure OTP to the admin user
+
+Then I signed out and logged in again with my username and password. This time Keycloak did not open the console. It showed the Mobile Authenticator Setup page with a QR code and a list of supported apps (Google Authenticator, FreeOTP, Microsoft Authenticator). I scanned the QR code with the authenticator app on my phone and entered the 6-digit code that the app generated.
+
+[IMG b67.png] Figure 34: Setting up the authenticator app with the QR code
+
+After submitting the code I was logged in to the console again.
+
+[IMG b68.png] Figure 35: Logged in to the admin console after the OTP setup
+
+To check that OTP is really enforced, I signed out and logged in once more. After the password Keycloak now asks for the one-time code. Two OTP devices are listed on this page, "unnamed" and "mezrait", so two authenticator registrations exist for this account.
+
+[IMG b69.png] Figure 36: The next login asks for a one-time code
+
+The Credentials tab of the admin user also shows the two credential types, Password and OTP.
+
+[IMG b70.png] Figure 37: The admin user now has a password and an OTP credential
+
+How it works: the QR code contains a shared secret key. My phone and Keycloak both combine this secret with the current time to calculate the same 6-digit code, which changes every 30 seconds (TOTP, time-based one-time password [6]). Because the code depends on the secret on my phone, a stolen password alone is not enough to log in.
+
+My reflections:
+
+- The QR code is the secret itself. Anyone who has a copy of the QR code (for example from a screenshot) can generate the same codes. In my lab it is acceptable because this Keycloak is temporary and runs only on my laptop, but in a real system the QR code should never be shared or saved.
+- Every registered OTP device is another way to pass the second factor. An unused registration (like the extra "unnamed" one) should be removed, so that only devices the user actually controls are accepted.
+- OTP protects against stolen passwords, but not against phishing in real time: if a fake site asks for the password and the code and forwards them immediately, the attacker can still log in. Phishing-resistant methods like WebAuthn/passkeys (which Keycloak also offers in the required actions list in Figure 33) are stronger.
+
+## Step 4 – Creating a new realm
+
+A realm is a separate space with its own users, roles, clients and settings. Users of one realm cannot log in to another realm. The master realm is used to administer Keycloak itself, so applications and their users should be put in their own realm. Then a problem in an application realm does not give access to Keycloak's administration.
+
+I created the realm MyApp911 (911 are the last three digits of my student ID) from Manage realms → Create realm.
+
+[IMG b71.png] Figure 38: The new realm MyApp911 next to the master realm
+
+## Step 5 – Creating a user and testing the login
+
+Inside MyApp911 I created a user with my family name as the username: menber. The lab sheet says once to use the family name and once that the screenshot should show the first name as the username, which is contradictory; I followed the step itself and used the family name. I also filled in an email, first name and last name. Keycloak 26 requires these fields for the user profile, and without them the user would be asked to fill them in at the first login. I checked that the top left of the console showed MyApp911 as the current realm, so that the user would not be created in master by mistake.
+
+[IMG b73.png] Figure 39: Creating the user menber in the MyApp911 realm
+
+[IMG b74.png] Figure 40: The user menber was created
+
+Then I set the password in the Credentials tab. The Temporary switch is On by default. If it stays On, the user must choose a new password at the first login. Since the lab asks for my student ID as the password, I switched Temporary Off.
+
+[IMG b76.png] Figure 41: Setting the password with Temporary switched off
+
+[IMG b77.png] Figure 42: The password was set successfully
+
+To test the user, I opened the account page of the realm, http://localhost:8080/realms/MyApp911/account, in an incognito window, so that the admin session would not interfere. The login page shows the realm name MYAPP911, which confirms that the user logs in to my realm and not to master.
+
+[IMG b78.png] Figure 43: Logging in as menber to the MyApp911 account console
+
+The login went directly to the account console, without asking for a new password, so the Temporary setting worked.
+
+[IMG b79.png] Figure 44: The account console of the user menber
+
+Finally I updated the account information as the lab asks. I changed the first name to Mezrait1093911 and saved, and Keycloak confirmed "Your account has been updated". This shows that users can manage their own profile in Keycloak without the admin.
+
+[IMG b80.png] Figure 45: Updating the account information as the user
+
+## Step 6 – Creating a public client
+
+A client is an application that uses Keycloak for login. A public client is an application that runs where users can see its code, like a single-page app in the browser or a mobile app. It cannot keep a secret, so it does not get a client secret.
+
+In MyApp911 I created the client my-client911 with the OpenID Connect protocol.
+
+[IMG b81.png] Figure 46: Creating the client my-client911
+
+[IMG b82.png] Figure 47: The client was created
+
+In the Access settings I added the valid redirect URI https://www.keycloak.org/app/* and the web origin https://www.keycloak.org. The redirect URI is a security check: after login, Keycloak will only send the user (and the authorization code) back to an address on this list. Without it an attacker could make Keycloak send the code to their own site. The web origin allows the JavaScript on keycloak.org to call the Keycloak token endpoint (CORS).
+
+[IMG b83.png] Figure 48: Valid redirect URI and web origin of my-client911
+
+In the Capability config, Client authentication is Off, which makes it a public client. Standard flow (the authorization code flow, where the user logs in on the Keycloak page) and Direct access grants are enabled.
+
+[IMG b85.png] Figure 49: Capability config of the public client
+
+Two security notes:
+
+- Keycloak shows a warning next to Require PKCE, which is Off. For a public client PKCE is important: since there is no secret, PKCE is what stops an attacker who steals the authorization code from exchanging it for a token [7].
+- Direct access grants lets an application send the user's username and password directly to the token endpoint. The lab asks to enable it, but in my opinion it is not a good idea for a public client, because the application then sees the user's password, which is exactly what an identity provider is supposed to avoid. The current OAuth 2.0 security best practice says this grant must not be used [8].
+
+## Step 7 – Testing the public client with the Keycloak demo application
+
+I opened the demo application https://www.keycloak.org/app/ in a new incognito window and entered the Keycloak URL http://localhost:8080, the realm MyApp911 and the client my-client911. The settings are kept in the page address.
+
+[IMG b87.png] Figure 50: The demo application configured for my realm and client
+
+Before clicking Sign in I opened the developer tools (F12) on the Network tab with logging kept between pages, so that the token request would be recorded. After Sign in, the browser was redirected to the MYAPP911 login page, I logged in as menber, and the demo app showed "Hello, Mezrait1093911 Menber". The name comes from the token, and it is the first name I changed in Step 5.
+
+[IMG b88.png] Figure 51: Logged in to the demo application as menber, with the network requests
+
+The network list shows the authorization code flow:
+
+1. auth?client_id=my-client911&redirect_uri=… with status 302: the browser was sent to Keycloak's authorization endpoint, I logged in there, and Keycloak redirected back to the demo app with a one-time authorization code in the address.
+2. token (type fetch): the JavaScript of the demo app sent the code to Keycloak's token endpoint and received the tokens.
+
+The Response tab of the token request shows what Keycloak returned:
+
+[IMG b89.png] Figure 52: The token response in the developer tools
+
+- access_token – a JWT that the application sends to APIs to prove who the user is. It expires after 300 seconds (expires_in).
+- refresh_token – used to get a new access token without logging in again; it is valid for 1800 seconds (refresh_expires_in).
+- id_token – a JWT with information about the login and the user, for the application itself (OpenID Connect).
+- token_type Bearer – whoever holds the token can use it, so tokens must be protected like passwords.
+- scope "openid profile email" – the information the application is allowed to receive.
+
+The short lifetime of the access token limits the damage if a token is stolen.
+
+The Payload tab shows what the demo app sent to get these tokens:
+
+[IMG b90.png] Figure 53: The token request sent by the demo application
+
+It sent grant_type=authorization_code, the code, the client_id and redirect_uri, and also a code_verifier. The code_verifier means the demo app uses PKCE: when the login started, it sent a hash of a random value (the code challenge), and now it proves it is the same application by sending the original value [7]. So in this case the app protects itself with PKCE even though my client does not require it. A malicious or badly written app would not, which is why Require PKCE should be On for public clients.
+
+## Step 8 – Creating a confidential client (in progress)
+
+A confidential client is an application that runs on a server, where it can keep a secret safely. It proves its identity to Keycloak with a client secret, and with the client credentials grant it can get a token for itself, without any user. I started creating the client my-Confidential-Client911 in the MyApp911 realm.
+
+[IMG b91.png] Figure 54: Creating the confidential client my-Confidential-Client911
+
+[Steps 8 (client authentication, service account and client secret), 9 (requesting a token with curl and decoding the JWT) and 10 (Google login) are still in progress and will be added here.]
