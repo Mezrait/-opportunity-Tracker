@@ -1,6 +1,6 @@
 # Part A – Access Control in a Linux System
 
-In this part I created a group and two users, checked how Linux stores them, and then tested how file and directory permissions decide what each user can do. At the end I tested the three special permission bits (SUID, SGID and the sticky bit).
+In this part I created a group and two users, checked how Linux stores them, and then tested how file and directory permissions decide what each user can do. At the end I tested the three special permission bits (SUID, SGID and the sticky bit) [4].
 
 ## Environment and setup
 
@@ -99,7 +99,7 @@ In symbolic mode the format is who (u, g, o, a), operator (+ adds, - removes, = 
 
 ## Part 4 – Absolute (octal) permissions
 
-In absolute mode each group of three permissions is written as one octal digit, where r = 4, w = 2 and x = 1, and the digit is the sum. For example 6 = 4 + 2 = rw- and 5 = 4 + 1 = r-x. Three digits give the permissions for user, group and others. The difference from symbolic mode is that octal sets all nine bits at once, while symbolic mode changes only the bits you name.
+In absolute mode each group of three permissions is written as one octal digit [4], where r = 4, w = 2 and x = 1, and the digit is the sum. For example 6 = 4 + 2 = rw- and 5 = 4 + 1 = r-x. Three digits give the permissions for user, group and others. The difference from symbolic mode is that octal sets all nine bits at once, while symbolic mode changes only the bits you name.
 
 I switched to danny with su - danny (password dannyPass). As the owner, danny can change the permissions of his own directory without root. I used chmod 705 danny:
 
