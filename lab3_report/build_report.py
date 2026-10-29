@@ -206,6 +206,8 @@ def add_table(doc, rows):
             cell.text = ""
             p = cell.paragraphs[0]
             p.paragraph_format.space_after = Pt(0)
+            # keep the table together with its caption
+            p.paragraph_format.keep_with_next = True
             if wide:
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             add_inline(p, val, size)
