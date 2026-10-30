@@ -11,7 +11,7 @@ I did this lab on Ubuntu 24.04.4 LTS running in WSL 2 on my Windows 11 laptop, n
 
 First I became root with sudo su (the screenshot below was taken later in the session, so the working directory is different, but the step is the same).
 
-[IMG c58_sudo.png] Figure 1: Becoming root with sudo su
+[IMG c58_sudo.png] Figure 1: Becoming root with sudo su (repeated later in the session)
 
 Since every screenshot must show my student ID, and in this lab it is also important to see which user is running each command, I changed the prompt to show the date, time, my ID and the current user and folder. I added the same line to /etc/skel/.bashrc before creating the new users, because every new user gets a copy of this file in their home directory, so sam and danny would also get the prompt automatically.
 
@@ -23,7 +23,7 @@ My first version used double quotes, and bash turned the \$ into a normal $ when
 
 The screenshot shows the old line that was removed from each file, and after reloading root's .bashrc the prompt ends with #. Normal users still show $.
 
-[IMG c43_ps1.png] Figure 3: Fixing the prompt – after the fix the root prompt ends with #
+[IMG c43_ps1.png] Figure 3: The old double-quoted PS1 lines that were removed, and the root prompt ending with # after reloading
 
 ## Part 1 – Adding a new group
 
@@ -61,11 +61,11 @@ The hashes are kept in /etc/shadow, which only root can read.
 
 [IMG c58_shadow.png] Figure 10: The entries for sam and danny in /etc/shadow
 
-The fields are username:hash:last change:min:max:warn:… . Two things are different from the lab sheet:
+The fields are username:hash:last change:min:max:warn:… . My hashes are different from the lab sheet in two ways:
 
 - My hashes start with $y$, which means yescrypt, while the lab sheet shows $6$ (SHA-512 crypt). Ubuntu changed its default password hash to yescrypt in newer versions. Yescrypt is designed to need a lot of memory, which makes guessing passwords with GPUs much slower than with SHA-512 [1].
 - The hash field is split by $ signs: $y$ is the algorithm (yescrypt), j9T is the cost parameters, the next part (for sam 43am0NEJx8wuew0QIUSg.) is the random salt, and the last part is the hash itself. Because each user gets a different random salt, two users with the same password would still have different hashes.
-- The number 20755 is the date of the last password change counted in days since 1 January 1970, which is 29 October 2026, the day I did the lab. 0:99999:7 means the password can be changed at any time, practically never expires, and the user is warned 7 days before expiry.
+Apart from the hash, the other fields have their usual meaning. The number 20755 is the date of the last password change counted in days since 1 January 1970, which is 29 October 2026, the day I did the lab. 0:99999:7 means the password can be changed at any time, practically never expires, and the user is warned 7 days before expiry.
 
 Finally I checked the group membership:
 
@@ -127,9 +127,9 @@ I switched to danny with su - danny (password dannyPass). As the owner, danny ca
 | 0 | group (danny) | 000 | --- |
 | 5 | others | 101 | r-x |
 
-[IMG c60_705.png] Figure 18: As danny – top: before and after chmod 705 (05:41–05:42); bottom: creating test.txt in the 705 directory (earlier run at 05:39)
+[IMG a60.png] Figure 18: As danny – the directory before and after chmod 705
 
-The directory changed from drwxr-xr-- to drwx---r-x. Then danny created test.txt. The new file got -rw-rw-r-- (664) without any chmod. This comes from the default umask 002 for normal users: new files start from 666 and the umask removes write from others. I confirmed the umask by running it as danny:
+The directory changed from drwxr-xr-- to drwx---r-x. Then danny created test.txt in his directory. The new file got -rw-rw-r-- (664) without any chmod (Figures 19 and 20). This comes from the default umask 002 for normal users: new files start from 666 and the umask removes write from others. I confirmed the umask by running it as danny:
 
 [IMG c58_umask.png] Figure 19: danny's umask is 0002, and test.txt is -rw-rw-r--
 
@@ -197,6 +197,6 @@ In my first attempt at this test I used rm without -f. Because the files are not
 |---|---|---|---|
 | SUID | chmod u+s (4xxx) | s in the user x position | program runs with the file owner's UID |
 | SGID | chmod g+s (2xxx) | s in the group x position | new files inherit the directory's group |
-| Sticky | chmod +t (1xxx) | t in the others x position | only the owner can delete files in the directory |
+| Sticky | chmod +t (1xxx) | t in the others x position | only the file owner, the directory owner or root can delete or rename files in the directory |
 
 Part A showed me that Linux access control is simple (owner, group, others and r, w, x) but the details matter: x on a directory decides if you can enter it, w on a directory decides if you can delete files in it, and usermod -G can quietly remove groups. I also saw that the defaults change between versions. Ubuntu 24.04 is stricter than the system the lab was written for (private home directories, yescrypt hashes), so it is important to check the real system and not assume.

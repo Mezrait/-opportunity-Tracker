@@ -52,7 +52,7 @@ After submitting the code I was logged in to the console again.
 
 [IMG b68.png] Figure 35: Logged in to the admin console after the OTP setup
 
-To check that OTP is really enforced, I signed out and logged in once more. After the password Keycloak now asks for the one-time code. Two OTP devices are listed on this page, "unnamed" and "mezrait", so two authenticator registrations exist for this account.
+To check that OTP is really enforced, I signed out and logged in once more. After the password Keycloak now asks for the one-time code. Two OTP devices are listed on this page, "unnamed" and "mezrait", so two authenticator registrations exist for this account. The "unnamed" one is the registration from Figure 34, where I left the Device Name field empty.
 
 [IMG b69.png] Figure 36: The next login asks for a one-time code
 
@@ -217,12 +217,13 @@ The important fields are:
 | iss | http://localhost:8080/realms/MyApp911 | the realm that issued the token |
 | iat / exp | 1793336180 / 1793336480 | issued 30 Oct 2026 08:56:20, expires 09:01:20 (+04:00), so it is valid for 300 seconds |
 | azp / client_id | my-Confidential-Client911 | the client that requested the token |
-| sub / preferred_username | service-account-my-confidential-client911 | the token belongs to the client's service account, not to a person |
-| aud | account | the audience the token is meant for |
+| sub | a59687e6-29bf-4029-ba0d-b1cc38b73fe9 | the internal ID of the account the token belongs to (here the service account) |
+| preferred_username | service-account-my-confidential-client911 | the readable name of that account: the token belongs to the client's service account, not to a person |
+| aud | account | the audience: this token is meant for Keycloak's built-in account client |
 | realm_access / resource_access | default-roles-myapp911, offline_access, uma_authorization; account roles | the roles of the service account |
 | clientAddress | 172.17.0.1 | the request came through the Docker network gateway, because Keycloak runs inside a container |
 
-How the token is validated: an API that receives this token does not need to ask Keycloak each time. It downloads the realm's public keys once from Keycloak's JWKS endpoint, finds the key with the same kid, and checks the RS256 signature. If even one character of the payload is changed, the signature check fails. After that it checks that iss is the expected realm, that exp is in the future and that aud matches the API. Because the token is only signed and not encrypted, it must not contain secrets, and it must be sent only over HTTPS.
+How the token is validated: an API that receives this token does not need to ask Keycloak each time. It downloads the realm's public keys once from Keycloak's JWKS endpoint, finds the key with the same kid, and checks the RS256 signature. If even one character of the payload is changed, the signature check fails. After that it checks that iss is the expected realm, that exp is in the future and that aud matches the API. For this particular token aud is account, so it is only meant for Keycloak's account client; any other API should reject it unless it is configured to accept that audience. To use it for my own API, I would add an audience mapper to the client so the API's name appears in aud. Because the token is only signed and not encrypted, it must not contain secrets, and it must be sent only over HTTPS.
 
 My reflection on jwt.io: pasting a real token into a website is risky, because a bearer token can be used by whoever has it until it expires. jwt.io says it decodes in the browser, but for real tokens decoding them locally, like I did in Figure 59, is safer. In this lab the risk is small because the token expired five minutes later and the server only runs on my laptop.
 
