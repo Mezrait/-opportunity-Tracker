@@ -311,6 +311,8 @@ def render(doc, md, cite_map, heading_no):
 TABLE_CAPTIONS = [
     "Meaning of chmod 705",
     "Summary of the special permission bits",
+    "Main claims of the client credentials access token",
+    "Summary of Part B",
 ]
 
 

@@ -158,10 +158,87 @@ The Payload tab shows what the demo app sent to get these tokens:
 
 It sent grant_type=authorization_code, the code, the client_id and redirect_uri, and also a code_verifier. The code_verifier means the demo app uses PKCE: when the login started, it sent a hash of a random value (the code challenge), and now it proves it is the same application by sending the original value [7]. So in this case the app protects itself with PKCE even though my client does not require it. A malicious or badly written app would not, which is why Require PKCE should be On for public clients.
 
-## Step 8 – Creating a confidential client (in progress)
+## Step 8 – Creating a confidential client
 
-A confidential client is an application that runs on a server, where it can keep a secret safely. It proves its identity to Keycloak with a client secret, and with the client credentials grant it can get a token for itself, without any user. I started creating the client my-Confidential-Client911 in the MyApp911 realm.
+A confidential client is an application that runs on a server, where users cannot see its code, so it can keep a secret. It proves its identity to Keycloak with a client secret. With the client credentials grant it can also get a token for itself, without any user being involved, for example a backend service that calls another API.
+
+I created the client my-Confidential-Client911 in the MyApp911 realm.
 
 [IMG b91.png] Figure 54: Creating the confidential client my-Confidential-Client911
 
-[Steps 8 (client authentication, service account and client secret), 9 (requesting a token with curl and decoding the JWT) and 10 (Google login) are still in progress and will be added here.]
+In the Capability config I turned Client authentication On (this is what makes the client confidential) and enabled Service account roles and Direct access grants. My first save did not have Service account roles ticked. I noticed this because the client had no "Service account roles" tab, and without it Keycloak refuses the client credentials grant. After I ticked it and saved again, Keycloak showed "Client successfully updated".
+
+[IMG b99.png] Figure 55: Capability config of the confidential client with Client authentication and Service account roles enabled
+
+Because Client authentication is On, the client now has a Credentials tab with the client secret. Keycloak generates it automatically. I made it visible to copy it into the terminal.
+
+[IMG b98.png] Figure 56: The client secret in the Credentials tab
+
+The client secret is effectively the password of the application. Anyone who has it can get tokens as this client, so in a real system it must be stored safely (for example in a secrets manager or an environment variable, never in source code) and replaced with Regenerate if it leaks. I am showing it here only because this Keycloak is a temporary local lab instance.
+
+## Step 9 – Requesting a token with curl
+
+I saved the secret in a shell variable, so I did not have to paste it into every command:
+
+[IMG b100.png] Figure 57: Storing the client secret in a variable
+
+First I ran the curl command exactly as it is printed in the lab sheet. In the sheet there is a space after client_secret= ('client_secret= my-Confidential-ClientXYZ-secret'). Keycloak rejected it with "unauthorized_client" / "Invalid client or Invalid client credentials", because the space becomes part of the secret, so the secret no longer matches. Then I ran the same command without the space and Keycloak returned an access token.
+
+    curl -s -L -X POST 'http://localhost:8080/realms/MyApp911/protocol/openid-connect/token' \
+      -H 'Content-Type: application/x-www-form-urlencoded' \
+      --data-urlencode 'client_id=my-Confidential-Client911' \
+      --data-urlencode "client_secret=$SECRET" \
+      --data-urlencode 'grant_type=client_credentials'
+
+[IMG b102.png] Figure 58: The lab's command fails because of the space; the corrected command returns a token
+
+The response is different from the one in Step 7:
+
+- There is an access_token with expires_in 300 (5 minutes) and token_type Bearer.
+- There is no refresh_token and no id_token (refresh_expires_in is 0). In the client credentials grant there is no user and no login session, so there is nothing to refresh and no user identity to describe. When the token expires, the service simply asks for a new one with its secret.
+- The scope is "profile email" without openid, again because no user logged in.
+
+### Inspecting the JWT
+
+A JWT has three parts separated by dots: header.payload.signature. The header and payload are only Base64URL-encoded, not encrypted, so anyone who has the token can read them. I decoded them in the terminal with a short Python command, so the token did not have to leave my machine:
+
+[IMG b103.png] Figure 59: The header and payload of the access token, decoded in the terminal
+
+I also pasted the token into the online decoder at jwt.io, as the lab asks. It shows the same header and payload.
+
+[IMG b101.png] Figure 60: The same token decoded on jwt.io
+
+The important fields are:
+
+| Claim | Value | Meaning |
+|---|---|---|
+| alg | RS256 | signed with RSA and SHA-256 using the realm's private key |
+| kid | gE_H1A5OpA… | which realm key signed the token |
+| iss | http://localhost:8080/realms/MyApp911 | the realm that issued the token |
+| iat / exp | 1793336180 / 1793336480 | issued 30 Oct 2026 08:56:20, expires 09:01:20 (+04:00), so it is valid for 300 seconds |
+| azp / client_id | my-Confidential-Client911 | the client that requested the token |
+| sub / preferred_username | service-account-my-confidential-client911 | the token belongs to the client's service account, not to a person |
+| aud | account | the audience the token is meant for |
+| realm_access / resource_access | default-roles-myapp911, offline_access, uma_authorization; account roles | the roles of the service account |
+| clientAddress | 172.17.0.1 | the request came through the Docker network gateway, because Keycloak runs inside a container |
+
+How the token is validated: an API that receives this token does not need to ask Keycloak each time. It downloads the realm's public keys once from Keycloak's JWKS endpoint, finds the key with the same kid, and checks the RS256 signature. If even one character of the payload is changed, the signature check fails. After that it checks that iss is the expected realm, that exp is in the future and that aud matches the API. Because the token is only signed and not encrypted, it must not contain secrets, and it must be sent only over HTTPS.
+
+My reflection on jwt.io: pasting a real token into a website is risky, because a bearer token can be used by whoever has it until it expires. jwt.io says it decodes in the browser, but for real tokens decoding them locally, like I did in Figure 59, is safer. In this lab the risk is small because the token expired five minutes later and the server only runs on my laptop.
+
+## Step 10 – Google login (self-learning)
+
+[Step 10 is still in progress and will be added here.]
+
+## Part B summary
+
+| Concept | What I did / saw |
+|---|---|
+| Realm | MyApp911, separate from the master realm used to administer Keycloak |
+| User | menber, password not temporary, can update their own profile |
+| 2FA | TOTP from an authenticator app enforced for the admin account |
+| Public client | my-client911, no secret, authorization code flow (the demo app used PKCE) |
+| Confidential client | my-Confidential-Client911, client secret, client credentials grant, service account |
+| Token | RS256-signed JWT, valid 5 minutes, contains issuer, client, subject and roles |
+
+Part B showed me how an identity provider moves authentication out of the applications: the demo app never saw menber's password, it only received a signed token from Keycloak. I also found that many security properties depend on settings that are easy to get wrong: Temporary passwords, missing redirect URIs, PKCE not required, Direct access grants left on, a missing service account role, and even a single space in a curl command.
