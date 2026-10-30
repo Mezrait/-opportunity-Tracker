@@ -226,9 +226,59 @@ How the token is validated: an API that receives this token does not need to ask
 
 My reflection on jwt.io: pasting a real token into a website is risky, because a bearer token can be used by whoever has it until it expires. jwt.io says it decodes in the browser, but for real tokens decoding them locally, like I did in Figure 59, is safer. In this lab the risk is small because the token expired five minutes later and the server only runs on my laptop.
 
-## Step 10 – Google login (self-learning)
+## Step 10 – Login with Google (identity brokering)
 
-[Step 10 is still in progress and will be added here.]
+In this step Keycloak does not check the password itself. It acts as a broker: it sends the user to Google, Google authenticates them and sends Keycloak an OpenID Connect token, and Keycloak then logs the user in to my realm. For this, Keycloak becomes a client of Google, in the same way that my demo app was a client of Keycloak in Step 7. I used my existing realm MyApp911 instead of creating another realm, because it already has a working account console to test with.
+
+### Google Cloud side
+
+First I opened Identity providers → Google in Keycloak. Keycloak shows the Redirect URI it expects Google to send the user back to: http://localhost:8080/realms/MyApp911/broker/google/endpoint.
+
+In the Google Cloud Console I created a new project for the lab.
+
+[IMG b106.png] Figure 61: Creating the Google Cloud project ITE408-Lab3-1093911
+
+Then I configured the Google Auth Platform (the OAuth consent screen) with an app name, my contact email and the audience External. While an app is in "Testing" status, only listed test users can log in, so I added my own Gmail address as a test user.
+
+[IMG b110.png] Figure 62: External audience in Testing mode with my Gmail as the only test user
+
+Then I created an OAuth client of type Web application and added the Keycloak redirect URI under Authorized redirect URIs. Google only sends the authorization code back to addresses on this list, which is the same protection as the valid redirect URIs in my own Keycloak client (Step 6). Google accepts plain http here only because the host is localhost; a real server would need https.
+
+[IMG b111.png] Figure 63: The Google OAuth client with the Keycloak redirect URI
+
+Google then showed the client ID and the client secret. It warns that the secret cannot be viewed again after closing the dialog. I have hidden the secret in the screenshot.
+
+[IMG b112_redacted.png] Figure 64: Google created the OAuth client (client secret hidden)
+
+### Keycloak side
+
+Back in Keycloak I entered Google's client ID and client secret in the Google identity provider and set the display name to Google (secret hidden in the screenshot). One thing I had to be careful about: Chrome had automatically filled these two fields with my saved Keycloak admin username and password, so I had to delete them and paste the Google values.
+
+[IMG b113_redacted.png] Figure 65: Configuring the Google identity provider in the MyApp911 realm
+
+[IMG b114.png] Figure 66: Google is now an identity provider of the realm
+
+### Testing the login
+
+I opened the account console of MyApp911 in an incognito window. The login page now has a "Sign in with Google" button under the normal username and password form.
+
+[IMG b115.png] Figure 67: The MyApp911 login page with the Sign in with Google button
+
+I clicked it, chose my Gmail account on Google's page, and was sent back to Keycloak and logged in to the account console. The username is my Gmail address, and the first name, last name and email were copied from my Google profile.
+
+[IMG b116.png] Figure 68: Logged in to the MyApp911 account console with my Google account
+
+In the admin console the realm now has two users: menber, which I created by hand, and mezraitmenber@gmail.com, which Keycloak created automatically the first time I logged in with Google (created at 9:21:51 AM).
+
+[IMG b117.png] Figure 69: The Google user appears in the realm's user list
+
+[IMG b118.png] Figure 70: The user created through Google login
+
+Observations:
+
+- This user has no password in Keycloak. Authentication is fully delegated to Google, so Google's security (including my Google 2-step verification, if enabled) protects this login, and my Keycloak never sees my Google password.
+- Email verified is Off for both users and the user list shows a warning icon next to the emails. For the Google user this is because the identity provider is not configured to trust the email from Google. Google does verify Gmail addresses, so in practice I could turn on "Trust Email" for this provider, but I left the default because trusting an external provider's data is a decision an administrator should make on purpose.
+- Anyone with a Google account could create a user in my realm this way, unless I restrict it (for example with Google's Hosted Domain setting for an organization, or by changing the first broker login flow so new users are not created automatically). In my case Google's Testing mode already limits it to my test user.
 
 ## Part B summary
 
@@ -240,5 +290,6 @@ My reflection on jwt.io: pasting a real token into a website is risky, because a
 | Public client | my-client911, no secret, authorization code flow (the demo app used PKCE) |
 | Confidential client | my-Confidential-Client911, client secret, client credentials grant, service account |
 | Token | RS256-signed JWT, valid 5 minutes, contains issuer, client, subject and roles |
+| Identity brokering | Login with Google; Keycloak created the user automatically from the Google profile |
 
 Part B showed me how an identity provider moves authentication out of the applications: the demo app never saw menber's password, it only received a signed token from Keycloak. I also found that many security properties depend on settings that are easy to get wrong: Temporary passwords, missing redirect URIs, PKCE not required, Direct access grants left on, a missing service account role, and even a single space in a curl command.
